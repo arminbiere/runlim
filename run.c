@@ -49,11 +49,9 @@ typedef enum Status Status;
 "    -o <file>                overwrite or create <file> for logging\n" \
 "    --output-file=<file>\n" \
 "\n" \
-"    -s <number>              set space limit to <number> MB\n" \
-"    --space-limit=<number>\n" \
+"    --space-limit=<number>   set space limit to <number> MB\n" \
 "\n" \
-"    -t <number>              set time limit to <number> seconds\n" \
-"    --time-limit=<number>\n" \
+"    --time-limit=<number>    set time limit to <number> seconds\n" \
 "\n" \
 "The program is the name of an executable followed by its arguments.\n"
 

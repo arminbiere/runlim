@@ -14,5 +14,5 @@ echo " $version"
 
 printf "$fmt" "generating Makefile"
 rm -f Makefile
-sed -e "s,@VERSION@,$version,g" Makefile.in > Makefile
+sed -e "s,@VERSION@,\"$version\",g" Makefile.in > Makefile
 echo " done"

@@ -39,6 +39,9 @@ static void usage(void)
 "    -h                       print this command line summary\n"
 "    --help\n"
 "\n"
+"    -v                       print version number\n"
+"    --version\n"
+"\n"
 "    -s                       do not log execution status and resource usage\n"
 "    --silent\n"
 "\n"
@@ -242,6 +245,12 @@ int main(int argc, char ** argv)
 	      silent = 1;
 	    }
 	  else
+	  if(strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0)
+	    {
+	      printf("%s\n", VERSION);
+	      exit(0);
+	    }
+	  else
 	  if(strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
 	    {
 	      usage();
@@ -348,7 +357,7 @@ int main(int argc, char ** argv)
   if(!silent)
     {
       t = time(0);
-      fprintf(log, "[run] end:\t\t%s", ctime(&t));
+      fprintf(log, "\n[run] end:\t\t%s", ctime(&t));
       fprintf(log, "[run] status:\t\t");
       switch(ok)
         {

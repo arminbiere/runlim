@@ -1,0 +1,12 @@
+#!/bin/sh
+
+for s in log/*.c
+do
+  base=`basename $s .c`
+  gcc -o log/${base}-exe log/$base.c
+  ./run \
+    -o log/$base.log \
+    -m 5 \
+    -t 5\
+    ./log/${base}-exe 1>log/$base.out 2>log/$base.err
+done

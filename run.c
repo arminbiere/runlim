@@ -10,7 +10,10 @@
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <asm/param.h>
+#include <netinet/in.h>
 
+asdf HZ
 /*------------------------------------------------------------------------*/
 
 #define SAMPLE_RATE 100000		/* in milliseconds */
@@ -221,6 +224,14 @@ static double max_mb = -1;
 
 /*------------------------------------------------------------------------*/
 
+#ifndef HZ
+/* If 32-bit or big-endian (not Alpha or ia64), assume HZ is 100. */
+#define HZ \
+((sizeof(long)==sizeof(int) || htons(999)==999) ? 100UL : 1024UL)
+#endif
+
+/*------------------------------------------------------------------------*/
+
 static unsigned time_limit, space_limit;
 
 /*------------------------------------------------------------------------*/
@@ -282,14 +293,14 @@ sample (double * time_ptr, double * mb_ptr)
 	  case STIME_POS:
 	    if (sscanf (token, "%d", &tmp) == 1)
 	      {
-		stime = tmp;
+		stime = tmp / (double) HZ;
 		assert (stime >= 0);
 	      }
 	    break;
 	  case UTIME_POS:
 	    if (sscanf (token, "%d", &tmp) == 1)
 	      {
-		utime = tmp;
+		utime = tmp / (double) HZ;
 		assert (usage >= 0);
 	      }
 	    break;

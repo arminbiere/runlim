@@ -2,5 +2,7 @@
 
 int main()
 {
-  malloc(10 * 1024 * 1014);
+  unsigned i, size = 1 << 23;
+  char * a = malloc(size);
+  for(i = 0; i < size; i++) a[i] = 0x55;
 }

@@ -1,0 +1,13 @@
+CC=gcc
+CFLAGS=-Wall -g
+
+all:
+	$(CC) $(CFLAGS) -o run run.c
+
+clean:
+	rm -f core run
+
+distclean: clean
+	rm -f Makefile
+
+.PHONY: all clean distclean

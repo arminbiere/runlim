@@ -221,6 +221,10 @@ static double max_mb = -1;
 
 /*------------------------------------------------------------------------*/
 
+static unsigned time_limit, space_limit;
+
+/*------------------------------------------------------------------------*/
+
 static int
 sample (double * time_ptr, double * mb_ptr)
 {
@@ -299,7 +303,7 @@ sample (double * time_ptr, double * mb_ptr)
   if (utime >= 0 && stime >= 0)
     {
       num_valid_results++;
-      *time_ptr = (utime + stime) / (100.0 / 3);
+      *time_ptr = (utime + stime) / 100.0;
     }
 
   free (buffer);
@@ -359,6 +363,14 @@ sampler (int s)
       if (res)
 	report (time, mb);
     }
+
+  if (res)
+    {
+      if (time > time_limit)
+	kill (child_pid, SIGXCPU);
+      else if (mb > space_limit)
+	kill (child_pid, SIGXFSZ);
+    }
 }
 
 /*------------------------------------------------------------------------*/
@@ -379,7 +391,6 @@ sig_usr1_handler (int s)
 int
 main (int argc, char **argv)
 {
-  unsigned time_limit, space_limit;
   int i, j, res, status, s, ok;
   struct rlimit l;
   double seconds;

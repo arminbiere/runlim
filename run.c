@@ -11,9 +11,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <asm/param.h>
-#include <netinet/in.h>
 
-asdf HZ
 /*------------------------------------------------------------------------*/
 
 #define SAMPLE_RATE 100000		/* in milliseconds */
@@ -226,6 +224,7 @@ static double max_mb = -1;
 
 #ifndef HZ
 /* If 32-bit or big-endian (not Alpha or ia64), assume HZ is 100. */
+#include <netinet/in.h>
 #define HZ \
 ((sizeof(long)==sizeof(int) || htons(999)==999) ? 100UL : 1024UL)
 #endif
@@ -241,7 +240,7 @@ sample (double * time_ptr, double * mb_ptr)
 {
   int ch, i, tmp, num_valid_results;
   char name[80], * buffer, * token;
-  double utime, stime;
+  double ujiffies, sjiffies;
   size_t size, pos;
   unsigned vsize;
   FILE * file;
@@ -266,7 +265,7 @@ sample (double * time_ptr, double * mb_ptr)
 
   fclose (file);
 
-  utime = stime = -1;
+  ujiffies = sjiffies = -1;
   num_valid_results = 0;
   vsize = 0;
 
@@ -293,14 +292,14 @@ sample (double * time_ptr, double * mb_ptr)
 	  case STIME_POS:
 	    if (sscanf (token, "%d", &tmp) == 1)
 	      {
-		stime = tmp / (double) HZ;
-		assert (stime >= 0);
+		sjiffies = tmp;
+		assert (sjiffies >= 0);
 	      }
 	    break;
 	  case UTIME_POS:
 	    if (sscanf (token, "%d", &tmp) == 1)
 	      {
-		utime = tmp / (double) HZ;
+		ujiffies = tmp;
 		assert (usage >= 0);
 	      }
 	    break;
@@ -311,10 +310,10 @@ sample (double * time_ptr, double * mb_ptr)
       token = strtok (0, " ");
     }
 
-  if (utime >= 0 && stime >= 0)
+  if (ujiffies >= 0 && sjiffies >= 0)
     {
       num_valid_results++;
-      *time_ptr = (utime + stime) / 100.0;
+      *time_ptr = (ujiffies + sjiffies) / HZ;
     }
 
   free (buffer);

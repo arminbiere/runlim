@@ -13,8 +13,8 @@
 
 /*------------------------------------------------------------------------*/
 
-#define MB_SAMPLE_RATE 100000		/* in milliseconds */
-#define REPORT_RATE 100			/* in terms of sampling */
+#define SAMPLE_RATE 100000		/* in milliseconds */
+#define REPORT_RATE 10			/* in terms of sampling */
 
 /*------------------------------------------------------------------------*/
 
@@ -212,12 +212,16 @@ static double max_mb = -1;
 
 /*------------------------------------------------------------------------*/
 
-#define VIRTUAL_MEMORY_POS_IN_STAT 23
+#define PID_POS 0
+#define PPID_POS 3
+#define STIME_POS 13
+#define UTIME_POS 14
+#define VSIZE_POS 23
 
 /*------------------------------------------------------------------------*/
 
 static int
-get_space (double * res_ptr)
+sample (double * time_ptr, double * mb_ptr)
 {
   char name[80], * buffer, * token;
   size_t size, pos;
@@ -248,7 +252,8 @@ get_space (double * res_ptr)
   if (!token)
     return 0;
 
-  for (i = 1; token && i < VIRTUAL_MEMORY_POS_IN_STAT; i++)
+  i = 1;
+  for (i = 1; token && i < VSIZE_POS; i++)
     token = strtok (0, " ");
 
   res = 0;
@@ -256,7 +261,7 @@ get_space (double * res_ptr)
     {
       if (sscanf (token, "%u", &vsize) == 1)
 	{
-	  *res_ptr = ((double)vsize) / 1024.0 / 1024.0;
+	  *mb_ptr = ((double)vsize) / 1024.0 / 1024.0;
 	  res = 1;
 	}
     }
@@ -268,66 +273,52 @@ get_space (double * res_ptr)
 
 /*------------------------------------------------------------------------*/
 
-static int
-get_time (double * res_ptr)
+static double
+get_time (void)
 {
   double res, utime, stime;
   struct rusage u;
 
   if (getrusage (RUSAGE_CHILDREN, &u))
-    return 0;
+    return -1;
 
   utime = u.ru_stime.tv_sec + 10e-7 * (double) u.ru_stime.tv_usec;
   stime = u.ru_utime.tv_sec + 10e-7 * (double) u.ru_utime.tv_usec;
   res = utime + stime;
-  *res_ptr = res;
 
-  return 1;
+  return res;
 }
 
 /*------------------------------------------------------------------------*/
 
 static void
-report (void)
+report (double time, double mb)
 {
-  double time;
-
-  fputs ("[run] ", log);
-
-  fputs ("[run] ", log);
-  if (get_time (&time))
-    fprintf (log, "%.1f", time);
-  else
-    fputs ("unavailable", log);
-
-  fputs (" seconds, ", log);
-
-  if (max_mb >= 0)
-    fprintf (log, "%.1f", time);
-  else
-    fputs ("unvailable", log);
-
-  fputs (" MB\n", log);
+  fprintf (log, "[run] sample:\t\t%.1f second, %.1f MB\n", time, mb);
   fflush (log);
 }
 
 /*------------------------------------------------------------------------*/
 
-static void
-sig_prof_handler (int s)
-{
-  double new_mb;
+struct itimerval timer, old_timer;
 
-  assert (s == SIGPROF);
+/*------------------------------------------------------------------------*/
+
+static void
+sampler (int s)
+{
+  double mb, time;
+
+  assert (s == SIGALRM);
   num_samples++;
 
-  if (get_space (&new_mb) && new_mb > max_mb)
-    max_mb = new_mb;
+  if (sample (&time, &mb) && mb > max_mb)
+    max_mb = mb;
 
   if (++num_samples_since_last_report >= REPORT_RATE)
     {
       num_samples_since_last_report = 0;
-      report ();
+      report (time, mb);
     }
 }
 
@@ -451,7 +442,16 @@ main (int argc, char **argv)
 	  fprintf (log, "[run] child pid:\t%d\n", (int) child_pid);
 	  fflush (log);
 
+	  assert (SAMPLE_RATE < 1000000);
+	  timer.it_interval.tv_sec = 0;
+	  timer.it_interval.tv_usec = SAMPLE_RATE;
+	  timer.it_value = timer.it_interval;
+	  signal (SIGALRM, sampler);
+	  setitimer (ITIMER_REAL, &timer, &old_timer);
+
 	  (void) wait (&status);
+
+	  setitimer (ITIMER_REAL, &old_timer, &timer);
 
 	  if (WIFEXITED (status))
 	    res = WEXITSTATUS (status);
@@ -536,10 +536,10 @@ main (int argc, char **argv)
   fprintf (log, "[run] result:\t\t%d\n", res);
   fflush (log);
 
-  (void) get_time (&seconds);
+  seconds = get_time ();
   fprintf (log, "[run] time:\t\t%.1f seconds\n", seconds);
   fprintf (log, "[run] space:\t\t%.1f MB\n", max_mb);
-  fprintf (log, "[run] smaples: %u\n", num_samples);
+  fprintf (log, "[run] samples:\t\t%u\n", num_samples);
 
   fflush (log);
 

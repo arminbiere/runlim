@@ -206,6 +206,7 @@ get_physical_mb ()
 
 static FILE *log = 0;
 static int child_pid = -1;
+static int parent_pid = -1;
 static int num_samples_since_last_report = 0;
 static unsigned num_samples = 0;
 static double max_mb = -1;
@@ -216,16 +217,17 @@ static double max_mb = -1;
 #define PPID_POS 3
 #define STIME_POS 13
 #define UTIME_POS 14
-#define VSIZE_POS 23
+#define VSIZE_POS 22
 
 /*------------------------------------------------------------------------*/
 
 static int
 sample (double * time_ptr, double * mb_ptr)
 {
+  int ch, i, tmp, num_valid_results;
   char name[80], * buffer, * token;
+  double utime, stime;
   size_t size, pos;
-  int ch, i, res;
   unsigned vsize;
   FILE * file;
 
@@ -236,6 +238,7 @@ sample (double * time_ptr, double * mb_ptr)
     return 0;
 
   buffer = malloc (size = 100);
+  num_valid_results = 0;
   pos = 0;
 
   while ((ch = getc (file)) != EOF)
@@ -248,27 +251,60 @@ sample (double * time_ptr, double * mb_ptr)
 
   fclose (file);
 
+  utime = stime = -1;
+  num_valid_results = 0;
+  vsize = 0;
+
   token = strtok (buffer, " ");
-  if (!token)
-    return 0;
+  i = 0;
 
-  i = 1;
-  for (i = 1; token && i < VSIZE_POS; i++)
-    token = strtok (0, " ");
-
-  res = 0;
-  if (token)
+  while (token)
     {
-      if (sscanf (token, "%u", &vsize) == 1)
+      switch (i++)
 	{
-	  *mb_ptr = ((double)vsize) / 1024.0 / 1024.0;
-	  res = 1;
+	  case VSIZE_POS:
+	    if (sscanf (token, "%u", &vsize) == 1)
+	      {
+		*mb_ptr = ((double)vsize) / 1024.0 / 1024.0;
+		num_valid_results++;
+	      }
+	    break;
+	  case PID_POS:
+	    assert (atoi (token) == child_pid);
+	    break;
+	  case PPID_POS:
+	    assert (atoi (token) == parent_pid);
+	    break;
+	  case STIME_POS:
+	    if (sscanf (token, "%d", &tmp) == 1)
+	      {
+		stime = tmp;
+		assert (stime >= 0);
+	      }
+	    break;
+	  case UTIME_POS:
+	    if (sscanf (token, "%d", &tmp) == 1)
+	      {
+		utime = tmp;
+		assert (usage >= 0);
+	      }
+	    break;
+	  default:
+	    break;
 	}
+
+      token = strtok (0, " ");
+    }
+
+  if (utime >= 0 && stime >= 0)
+    {
+      num_valid_results++;
+      *time_ptr = (utime + stime) / (100.0 / 3);
     }
 
   free (buffer);
 
-  return res;
+  return num_valid_results == 2;
 }
 
 /*------------------------------------------------------------------------*/
@@ -308,17 +344,20 @@ static void
 sampler (int s)
 {
   double mb, time;
+  int res;
 
   assert (s == SIGALRM);
   num_samples++;
 
-  if (sample (&time, &mb) && mb > max_mb)
+  res = sample (&time, &mb);
+  if (res && mb > max_mb)
     max_mb = mb;
 
   if (++num_samples_since_last_report >= REPORT_RATE)
     {
       num_samples_since_last_report = 0;
-      report (time, mb);
+      if (res)
+	report (time, mb);
     }
 }
 
@@ -428,6 +467,7 @@ main (int argc, char **argv)
   fflush (log);
 
   signal (SIGUSR1, sig_usr1_handler);
+  parent_pid = getpid ();
 
   if ((child_pid = fork ()) != 0)
     {

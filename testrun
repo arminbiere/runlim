@@ -6,7 +6,7 @@ do
   gcc -o log/${base}.exe log/$base.c
   ./run \
     -o log/$base.log \
-    -m 5 \
+    -s 5 \
     -t 5\
     ./log/${base}.exe 1>log/$base.out 2>log/$base.err
 done

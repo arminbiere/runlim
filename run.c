@@ -14,8 +14,8 @@
 
 /*------------------------------------------------------------------------*/
 
-#define SAMPLE_RATE 100000		/* in milliseconds */
-#define REPORT_RATE 10			/* in terms of sampling */
+#define SAMPLE_RATE 100000	/* in milliseconds */
+#define REPORT_RATE 10		/* in terms of sampling */
 
 /*------------------------------------------------------------------------*/
 
@@ -236,14 +236,14 @@ static unsigned time_limit, space_limit;
 /*------------------------------------------------------------------------*/
 
 static int
-sample (double * time_ptr, double * mb_ptr)
+sample (double *time_ptr, double *mb_ptr)
 {
   int ch, i, tmp, num_valid_results;
-  char name[80], * buffer, * token;
+  char name[80], *buffer, *token;
   double ujiffies, sjiffies;
   size_t size, pos;
   unsigned vsize;
-  FILE * file;
+  FILE *file;
 
 
   sprintf (name, "/proc/%d/stat", child_pid);
@@ -276,35 +276,35 @@ sample (double * time_ptr, double * mb_ptr)
     {
       switch (i++)
 	{
-	  case VSIZE_POS:
-	    if (sscanf (token, "%u", &vsize) == 1)
-	      {
-		*mb_ptr = ((double)vsize) / 1024.0 / 1024.0;
-		num_valid_results++;
-	      }
-	    break;
-	  case PID_POS:
-	    assert (atoi (token) == child_pid);
-	    break;
-	  case PPID_POS:
-	    assert (atoi (token) == parent_pid);
-	    break;
-	  case STIME_POS:
-	    if (sscanf (token, "%d", &tmp) == 1)
-	      {
-		sjiffies = tmp;
-		assert (sjiffies >= 0);
-	      }
-	    break;
-	  case UTIME_POS:
-	    if (sscanf (token, "%d", &tmp) == 1)
-	      {
-		ujiffies = tmp;
-		assert (usage >= 0);
-	      }
-	    break;
-	  default:
-	    break;
+	case VSIZE_POS:
+	  if (sscanf (token, "%u", &vsize) == 1)
+	    {
+	      *mb_ptr = ((double) vsize) / 1024.0 / 1024.0;
+	      num_valid_results++;
+	    }
+	  break;
+	case PID_POS:
+	  assert (atoi (token) == child_pid);
+	  break;
+	case PPID_POS:
+	  assert (atoi (token) == parent_pid);
+	  break;
+	case STIME_POS:
+	  if (sscanf (token, "%d", &tmp) == 1)
+	    {
+	      sjiffies = tmp;
+	      assert (sjiffies >= 0);
+	    }
+	  break;
+	case UTIME_POS:
+	  if (sscanf (token, "%d", &tmp) == 1)
+	    {
+	      ujiffies = tmp;
+	      assert (usage >= 0);
+	    }
+	  break;
+	default:
+	  break;
 	}
 
       token = strtok (0, " ");
@@ -407,9 +407,9 @@ main (int argc, char **argv)
   const char *p;
   time_t t;
 
-  ok = OK;				/* status of the run */
-  s = 0;				/* signal caught */
-  time_limit = 60 * 60 * 24;		/* one day */
+  ok = OK;			/* status of the run */
+  s = 0;			/* signal caught */
+  time_limit = 60 * 60 * 24;	/* one day */
   space_limit = get_physical_mb ();	/* physical memory size */
 
   for (i = 1; i < argc; i++)

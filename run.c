@@ -8,7 +8,13 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/resource.h>
+#include <sys/time.h>
 #include <unistd.h>
+
+/*------------------------------------------------------------------------*/
+
+#define MB_SAMPLE_RATE 100000		/* in milliseconds */
+#define REPORT_RATE 100			/* in terms of sampling */
 
 /*------------------------------------------------------------------------*/
 
@@ -29,29 +35,33 @@ typedef enum Status Status;
 
 /*------------------------------------------------------------------------*/
 
+#define USAGE \
+"usage: run [option ...] program [arg ...]\n" \
+"\n" \
+"  where option is from the following list:\n" \
+"\n" \
+"    -h                       print this command line summary\n" \
+"    --help\n" \
+"\n" \
+"    --version                print version number\n" \
+"\n" \
+"    -o <file>                overwrite or create <file> for logging\n" \
+"    --output-file=<file>\n" \
+"\n" \
+"    -s <number>              set space limit to <number> MB\n" \
+"    --space-limit=<number>\n" \
+"\n" \
+"    -t <number>              set time limit to <number> seconds\n" \
+"    --time-limit=<number>\n" \
+"\n" \
+"The program is the name of an executable followed by its arguments.\n"
+
+/*------------------------------------------------------------------------*/
+
 static void
 usage (void)
 {
-  printf ("usage: run [option ...] program [arg ...]\n"
-	  "\n"
-	  "  where option is from the following list:\n"
-	  "\n"
-	  "    -h                       print this command line summary\n"
-	  "    --help\n"
-	  "\n"
-	  "    -v                       print version number\n"
-	  "    --version\n"
-	  "\n"
-	  "    -o <file>                overwrite or create <file> for logging\n"
-	  "    --output-file=<file>\n"
-	  "\n"
-	  "    -m <number>              set space limit to <number> MB\n"
-	  "    --space-limit=<number>\n"
-	  "\n"
-	  "    -t <number>              set time limit to <number> seconds\n"
-	  "    --time-limit=<number>\n"
-	  "\n"
-	  "The program is the name of an executable followed by its arguments.\n");
+  printf (USAGE);
 }
 
 /*------------------------------------------------------------------------*/
@@ -194,15 +204,144 @@ get_physical_mb ()
 
 /*------------------------------------------------------------------------*/
 
+static FILE *log = 0;
+static int child_pid = -1;
+static int num_samples_since_last_report = 0;
+static unsigned num_samples = 0;
+static double max_mb = -1;
+
+/*------------------------------------------------------------------------*/
+
+#define VIRTUAL_MEMORY_POS_IN_STAT 23
+
+/*------------------------------------------------------------------------*/
+
+static int
+get_space (double * res_ptr)
+{
+  char name[80], * buffer, * token;
+  size_t size, pos;
+  int ch, i, res;
+  unsigned vsize;
+  FILE * file;
+
+
+  sprintf (name, "/proc/%d/stat", child_pid);
+  file = fopen (name, "r");
+  if (!file)
+    return 0;
+
+  buffer = malloc (size = 100);
+  pos = 0;
+
+  while ((ch = getc (file)) != EOF)
+    {
+      if (pos >= size - 1)
+	buffer = realloc (buffer, size *= 2);
+
+      buffer[pos++] = ch;
+    }
+
+  fclose (file);
+
+  token = strtok (buffer, " ");
+  if (!token)
+    return 0;
+
+  for (i = 1; token && i < VIRTUAL_MEMORY_POS_IN_STAT; i++)
+    token = strtok (0, " ");
+
+  res = 0;
+  if (token)
+    {
+      if (sscanf (token, "%u", &vsize) == 1)
+	{
+	  *res_ptr = ((double)vsize) / 1024.0 / 1024.0;
+	  res = 1;
+	}
+    }
+
+  free (buffer);
+
+  return res;
+}
+
+/*------------------------------------------------------------------------*/
+
+static int
+get_time (double * res_ptr)
+{
+  double res, utime, stime;
+  struct rusage u;
+
+  if (getrusage (RUSAGE_CHILDREN, &u))
+    return 0;
+
+  utime = u.ru_stime.tv_sec + 10e-7 * (double) u.ru_stime.tv_usec;
+  stime = u.ru_utime.tv_sec + 10e-7 * (double) u.ru_utime.tv_usec;
+  res = utime + stime;
+  *res_ptr = res;
+
+  return 1;
+}
+
+/*------------------------------------------------------------------------*/
+
+static void
+report (void)
+{
+  double time;
+
+  fputs ("[run] ", log);
+
+  fputs ("[run] ", log);
+  if (get_time (&time))
+    fprintf (log, "%.1f", time);
+  else
+    fputs ("unavailable", log);
+
+  fputs (" seconds, ", log);
+
+  if (max_mb >= 0)
+    fprintf (log, "%.1f", time);
+  else
+    fputs ("unvailable", log);
+
+  fputs (" MB\n", log);
+  fflush (log);
+}
+
+/*------------------------------------------------------------------------*/
+
+static void
+sig_prof_handler (int s)
+{
+  double new_mb;
+
+  assert (s == SIGPROF);
+  num_samples++;
+
+  if (get_space (&new_mb) && new_mb > max_mb)
+    max_mb = new_mb;
+
+  if (++num_samples_since_last_report >= REPORT_RATE)
+    {
+      num_samples_since_last_report = 0;
+      report ();
+    }
+}
+
+/*------------------------------------------------------------------------*/
+
 static int caught_usr1_signal = 0;
 
 /*------------------------------------------------------------------------*/
 
 static void
-handler (int s)
+sig_usr1_handler (int s)
 {
-  if (s == SIGUSR1)
-    caught_usr1_signal = 1;
+  assert (s == SIGUSR1);
+  caught_usr1_signal = 1;
 }
 
 /*------------------------------------------------------------------------*/
@@ -210,19 +349,17 @@ handler (int s)
 int
 main (int argc, char **argv)
 {
-  int i, j, res, child, status, s, ok;
-  unsigned max_seconds, max_mb;
-  struct rusage u;
+  unsigned time_limit, space_limit;
+  int i, j, res, status, s, ok;
   struct rlimit l;
+  double seconds;
   const char *p;
-  FILE *log;
   time_t t;
 
-  ok = OK;			/* status of the run */
-  log = 0;			/* log file */
-  s = 0;			/* signal caught */
-  max_seconds = 60 * 60 * 24;	/* one day as default time limit */
-  max_mb = get_physical_mb ();	/* physical memory size as space limit */
+  ok = OK;				/* status of the run */
+  s = 0;				/* signal caught */
+  time_limit = 60 * 60 * 24;		/* one day */
+  space_limit = get_physical_mb ();	/* physical memory size */
 
   for (i = 1; i < argc; i++)
     {
@@ -230,19 +367,19 @@ main (int argc, char **argv)
 	{
 	  if (argv[i][1] == 't')
 	    {
-	      max_seconds = parse_number_argument (&i, argc, argv);
+	      time_limit = parse_number_argument (&i, argc, argv);
 	    }
 	  else if (strstr (argv[i], "--time-limit=") == argv[i])
 	    {
-	      max_seconds = parse_number_rhs (argv[i]);
+	      time_limit = parse_number_rhs (argv[i]);
 	    }
-	  else if (argv[i][1] == 'm')
+	  else if (argv[i][1] == 's')
 	    {
-	      max_mb = parse_number_argument (&i, argc, argv);
+	      space_limit = parse_number_argument (&i, argc, argv);
 	    }
 	  else if (strstr (argv[i], "--space-limit=") == argv[i])
 	    {
-	      max_mb = parse_number_rhs (argv[i]);
+	      space_limit = parse_number_rhs (argv[i]);
 	    }
 	  else
 	    if (strcmp (argv[i], "-v") == 0
@@ -273,8 +410,7 @@ main (int argc, char **argv)
 	    }
 	  else
 	    {
-	      fprintf (stderr,
-		       "*** run: unknown command line option '%s' (try '-h')\n",
+	      fprintf (stderr, "*** run: invalid option '%s' (try '-h')\n",
 		       argv[i]);
 	      exit (1);
 	    }
@@ -292,19 +428,19 @@ main (int argc, char **argv)
   if (!log)
     log = stderr;
 
-  fprintf (log, "[run] time limit:\t%u seconds\n", max_seconds);
-  fprintf (log, "[run] space limit:\t%u MB\n", max_mb);
+  fprintf (log, "[run] time limit:\t%u seconds\n", time_limit);
+  fprintf (log, "[run] space limit:\t%u MB\n", space_limit);
   for (j = i; j < argc; j++)
     fprintf (log, "[run] argv[%d]:\t\t%s\n", j - i, argv[j]);
   t = time (0);
   fprintf (log, "[run] start:\t\t%s", ctime (&t));
   fflush (log);
 
-  signal (SIGUSR1, handler);
+  signal (SIGUSR1, sig_usr1_handler);
 
-  if ((child = fork ()) != 0)
+  if ((child_pid = fork ()) != 0)
     {
-      if (child < 0)
+      if (child_pid < 0)
 	{
 	  ok = FORK_FAILED;
 	  res = 1;
@@ -312,8 +448,8 @@ main (int argc, char **argv)
       else
 	{
 	  status = 0;
-	  fprintf (log, "[run] child pid:\t%d\n", (int) child);
-	  fflush (stderr);
+	  fprintf (log, "[run] child pid:\t%d\n", (int) child_pid);
+	  fflush (log);
 
 	  (void) wait (&status);
 
@@ -351,10 +487,10 @@ main (int argc, char **argv)
     }
   else
     {
-      l.rlim_cur = l.rlim_max = max_seconds;
+      l.rlim_cur = l.rlim_max = time_limit;
       setrlimit (RLIMIT_CPU, &l);
-      l.rlim_cur = l.rlim_max = max_mb << 20;
-      setrlimit (RLIMIT_DATA, &l);
+      l.rlim_cur = l.rlim_max = time_limit << 20;
+      setrlimit (RLIMIT_RSS, &l);
       execvp (argv[i], argv + i);
       kill (getppid (), SIGUSR1);
       exit (1);
@@ -364,7 +500,7 @@ main (int argc, char **argv)
     ok = EXEC_FAILED;
 
   t = time (0);
-  fprintf (log, "\n[run] end:\t\t%s", ctime (&t));
+  fprintf (log, "[run] end:\t\t%s", ctime (&t));
   fprintf (log, "[run] status:\t\t");
   switch (ok)
     {
@@ -393,28 +529,18 @@ main (int argc, char **argv)
       fputs ("execvp failed", log);
       break;
     default:
-      fprintf (log, "signal(%d)\n", s);
+      fprintf (log, "signal(%d)", s);
       break;
     }
   fputc ('\n', log);
   fprintf (log, "[run] result:\t\t%d\n", res);
   fflush (log);
 
-  if (getrusage (RUSAGE_CHILDREN, &u) == 0)
-    {
-      fprintf (log, "[run] time:\t\t%.1f seconds\n",
-#         ifdef INCLUDE_SYSTEM_TIME
-	       ((double) u.ru_stime.tv_sec) +
-	       10e-7 * ((double) u.ru_stime.tv_usec) +
-#         endif
-	       ((double) u.ru_utime.tv_sec) +
-	       10e-7 * ((double) u.ru_utime.tv_usec));
+  (void) get_time (&seconds);
+  fprintf (log, "[run] time:\t\t%.1f seconds\n", seconds);
+  fprintf (log, "[run] space:\t\t%.1f MB\n", max_mb);
+  fprintf (log, "[run] smaples: %u\n", num_samples);
 
-      fprintf (log, "[run] space:\t\t%.1f MB\n",
-	       u.ru_maxrss / 1024.0 / 1024.0);
-    }
-  else
-    fprintf (log, "[run] could not get resource usage\n");
   fflush (log);
 
   exit (res);

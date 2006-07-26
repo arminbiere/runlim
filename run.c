@@ -546,9 +546,10 @@ main (int argc, char **argv)
     }
   else
     {
-      l.rlim_cur = l.rlim_max = time_limit;
+      unsigned hard_time_limit = (time_limit * 101 + 99) / 100;	// + 1%
+      l.rlim_cur = l.rlim_max = hard_time_limit;
       setrlimit (RLIMIT_CPU, &l);
-      l.rlim_cur = l.rlim_max = time_limit << 20;
+      l.rlim_cur = l.rlim_max = hard_time_limit << 20;
       setrlimit (RLIMIT_RSS, &l);
       execvp (argv[i], argv + i);
       kill (getppid (), SIGUSR1);

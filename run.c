@@ -342,7 +342,7 @@ get_time (void)
 static void
 report (double time, double mb)
 {
-  fprintf (log, "[run] sample:\t\t%.1f second, %.1f MB\n", time, mb);
+  fprintf (log, "[run] sample:\t\t%.1f seconds, %.1f MB\n", time, mb);
   fflush (log);
 }
 

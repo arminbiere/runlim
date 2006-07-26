@@ -6,7 +6,7 @@ all:
 
 clean:
 	rm -f core run
-	rm -f log/*-exe log/*.out log/*.err log/*.log
+	rm -f log/*.exe log/*.out log/*.err log/*.log
 
 distclean: clean
 	rm -f Makefile

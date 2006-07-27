@@ -14,8 +14,8 @@
 
 /*------------------------------------------------------------------------*/
 
-#define SAMPLE_RATE 100000	/* in milliseconds */
-#define REPORT_RATE 10		/* in terms of sampling */
+#define SAMPLE_RATE 10000	/* in milliseconds */
+#define REPORT_RATE 100		/* in terms of sampling */
 
 /*------------------------------------------------------------------------*/
 
@@ -220,15 +220,6 @@ static double max_mb = -1;
 
 /*------------------------------------------------------------------------*/
 
-#ifndef HZ
-/* If 32-bit or big-endian (not Alpha or ia64), assume HZ is 100. */
-#include <netinet/in.h>
-#define HZ \
-((sizeof(long)==sizeof(int) || htons(999)==999) ? 100UL : 1024UL)
-#endif
-
-/*------------------------------------------------------------------------*/
-
 static unsigned time_limit, space_limit;
 
 /*------------------------------------------------------------------------*/
@@ -277,7 +268,7 @@ sample (double *time_ptr, double *mb_ptr)
 	case VSIZE_POS:
 	  if (sscanf (token, "%u", &vsize) == 1)
 	    {
-	      *mb_ptr = ((double) vsize) / 1024.0 / 1024.0;
+	      *mb_ptr = vsize / (double) (1 << 20);
 	      num_valid_results++;
 	    }
 	  break;
@@ -597,7 +588,7 @@ main (int argc, char **argv)
   fflush (log);
 
   seconds = get_time ();
-  fprintf (log, "[run] time:\t\t%.1f seconds\n", seconds);
+  fprintf (log, "[run] time:\t\t%.2f seconds\n", seconds);
   fprintf (log, "[run] space:\t\t%.1f MB\n", max_mb);
   fprintf (log, "[run] samples:\t\t%u\n", num_samples);
 

@@ -553,12 +553,19 @@ main (int argc, char **argv)
   t = time (0);
   fprintf (log, "[run] end:\t\t%s", ctime (&t));
   fprintf (log, "[run] status:\t\t");
+
+  seconds = get_time ();
+
+  if (seconds >= time_limit)
+    goto FORCE_OUT_OF_TIME_ENTRY;
+
   switch (ok)
     {
     case OK:
       fputs ("ok", log);
       break;
     case OUT_OF_TIME:
+FORCE_OUT_OF_TIME_ENTRY:
       fputs ("out of time", log);
       break;
     case OUT_OF_MEMORY:
@@ -587,7 +594,6 @@ main (int argc, char **argv)
   fprintf (log, "[run] result:\t\t%d\n", res);
   fflush (log);
 
-  seconds = get_time ();
   fprintf (log, "[run] time:\t\t%.2f seconds\n", seconds);
   fprintf (log, "[run] space:\t\t%.1f MB\n", max_mb);
   fprintf (log, "[run] samples:\t\t%u\n", num_samples);

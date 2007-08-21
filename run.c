@@ -622,6 +622,7 @@ report (double time, double mb)
 
 struct itimerval timer, old_timer;
 static int caught_out_of_memory;
+static int caught_out_of_time;
 
 /*------------------------------------------------------------------------*/
 
@@ -652,7 +653,14 @@ sampler (int s)
   if (res)
     {
       if (time > time_limit)
-	kill (child_pid, SIGXCPU);
+	{
+	  caught_out_of_time = 1;
+#if 0
+	  kill (child_pid, SIGXCPU);
+#else
+	  kill (child_pid, SIGTERM);
+#endif
+	}
       else if (mb > space_limit)
 	{
 	  caught_out_of_memory = 1;
@@ -821,10 +829,9 @@ main (int argc, char **argv)
 		  break;
 		case SIGTERM:
 		  if (caught_out_of_memory)
-		    {
-		      ok = OUT_OF_MEMORY;
-		      break;
-		    }
+		    ok = OUT_OF_MEMORY;
+		  else if (caught_out_of_time)
+		    ok = OUT_OF_TIME;
 		  else
 		    ok = OTHER_SIGNAL;
 		  break;

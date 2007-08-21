@@ -9,14 +9,21 @@
 #include <sys/wait.h>
 #include <sys/resource.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <asm/param.h>
+#include <dirent.h>
+#include <fcntl.h>
 
 /*------------------------------------------------------------------------*/
 
 #define SAMPLE_RATE 100000	/* in milliseconds */
 #define REPORT_RATE 10		/* in terms of sampling */
 
+#define COMM_LEN 16
+
+/*------------------------------------------------------------------------*/
+#define PROC_BASE    "/proc"
 /*------------------------------------------------------------------------*/
 
 enum Status
@@ -31,6 +38,29 @@ enum Status
   INTERNAL_ERROR,
   EXEC_FAILED
 };
+
+/*------------------------------------------------------------------------*/
+
+typedef struct _proc
+{
+  pid_t pid, ppid;
+  int highlight;
+  long unsigned ujiffies, sjiffies;
+  long unsigned vsize;
+  struct _child *children;
+  struct _proc *parent;
+  struct _proc *next;
+}
+PROC;
+
+typedef struct _child
+{
+  PROC *child;
+  struct _child *next;
+}
+CHILD;
+
+static PROC *list = NULL;
 
 typedef enum Status Status;
 
@@ -52,6 +82,8 @@ typedef enum Status Status;
 "    --space-limit=<number>   set space limit to <number> MB\n" \
 "\n" \
 "    --time-limit=<number>    set time limit to <number> seconds\n" \
+"\n" \
+"    --trace-children         run time and memory usage of children included\n" \
 "\n" \
 "The program is the name of an executable followed by its arguments.\n"
 
@@ -220,7 +252,257 @@ static double max_mb = -1;
 
 /*------------------------------------------------------------------------*/
 
-static unsigned time_limit, space_limit;
+static unsigned time_limit, space_limit, trace_children;
+
+/*------------------------------------------------------------------------*/
+
+static PROC *
+new_proc (pid_t pid, pid_t ppid, long unsigned sjiffies, 
+	  long unsigned ujiffies, unsigned vsize)
+{
+  PROC *new;
+
+  if (!(new = malloc (sizeof (PROC))))
+    {
+      perror ("malloc");
+      exit (1);
+    }
+  new->pid = pid;
+  new->ppid = ppid;
+  new->sjiffies = sjiffies;
+  new->ujiffies = ujiffies;
+  new->vsize = vsize;
+  new->highlight = 0;
+  new->children = NULL;
+  new->parent = NULL;
+  new->next = list;
+  return list = new;
+}
+
+/*------------------------------------------------------------------------*/
+
+static void
+add_child (PROC * parent, PROC * child)
+{
+  CHILD *new, **walk;
+
+  if (!(new = malloc (sizeof (CHILD))))
+    {
+      perror ("malloc");
+      exit (1);
+    }
+  new->child = child;
+  for (walk = &parent->children; *walk; walk = &(*walk)->next)
+    if ((*walk)->child->pid > child->pid)
+      break;
+
+  new->next = *walk;
+  *walk = new;
+}
+
+/*------------------------------------------------------------------------*/
+
+static PROC *
+find_proc (pid_t pid)
+{
+  PROC *walk;
+
+  for (walk = list; walk; walk = walk->next)
+    if (walk->pid == pid)
+      break;
+  return walk;
+}
+
+/*------------------------------------------------------------------------*/
+
+static void
+add_proc (pid_t pid, pid_t ppid, long unsigned sjiffies, 
+	  long unsigned ujiffies, unsigned vsize)
+{
+  PROC *this, *parent;
+
+  if (!(this = find_proc (pid)))
+    this = new_proc (pid, ppid, sjiffies, ujiffies, vsize);
+  else
+    {
+      /* was already there, update sjiffies, ujiffies and vsize */
+      this->sjiffies = sjiffies;
+      this->ujiffies = ujiffies;
+      this->vsize = vsize;
+      if (this->ppid != ppid)
+	{
+	  /* parent added before with ppid 0 */
+	  this->ppid = ppid;
+	}
+      return;
+    }
+
+  if (pid == ppid)
+    ppid = 0;
+
+  if (!(parent = find_proc (ppid)))
+    parent = new_proc (ppid, 0, 0, 0, 0);
+
+  add_child (parent, this);
+  this->parent = parent;
+}
+
+/*------------------------------------------------------------------------*/
+/*
+ * read_proc now uses a similar method as procps for finding the process
+ * name in the /proc filesystem. My thanks to Albert and procps authors.
+ */
+static void
+read_proc ()
+{
+  DIR *dir;
+  struct dirent *de;
+  FILE *file;
+  char *path, *buffer, *token;
+  pid_t pid, ppid;
+  int i, ch, tmp, size, pos, num_valid_results, empty;
+  long unsigned ujiffies, sjiffies;
+  unsigned vsize;
+
+  buffer = malloc (size = 100);
+
+  if (!(dir = opendir (PROC_BASE)))
+    {
+      perror (PROC_BASE);
+      exit (1);
+    }
+
+  empty = 1;
+  while ((de = readdir (dir)) != NULL)
+    {
+      empty = 0;
+      if ((pid = (pid_t) atoi (de->d_name)) != 0)
+	{
+	  if (!(path = malloc (strlen (PROC_BASE) + strlen (de->d_name) + 10)))
+	    exit (2);
+	  sprintf (path, "%s/%d/stat", PROC_BASE, pid);
+	  if ((file = fopen (path, "r")) != NULL)
+	    {
+	      num_valid_results = 0;
+	      pos = 0;
+	      
+	      while ((ch = getc (file)) != EOF)
+		{
+		  if (pos >= size - 1)
+		    buffer = realloc (buffer, size *= 2);
+		  
+		  buffer[pos++] = ch;
+		}
+	      
+	      fclose (file);
+	      
+	      ujiffies = sjiffies = -1;
+	      num_valid_results = 0;
+	      vsize = 0;
+	      
+	      token = strtok (buffer, " ");
+	      i = 0;
+	      
+	      while (token)
+		{
+		  switch (i++)
+		    {
+		    case VSIZE_POS:
+		      sscanf (token, "%u", &vsize);
+		      break;
+		    case PID_POS:
+		      assert (atoi (token) == pid);
+		      break;
+		    case PPID_POS:
+		      sscanf (token, "%d", &ppid);
+		      break;
+		    case STIME_POS:
+		      if (sscanf (token, "%d", &tmp) == 1)
+			{
+			  sjiffies = tmp;
+			  assert (sjiffies >= 0);
+			}
+		      break;
+		    case UTIME_POS:
+		      if (sscanf (token, "%d", &tmp) == 1)
+			{
+			  ujiffies = tmp;
+			  assert (usage >= 0);
+			}
+		      break;
+		    default:
+		      break;
+		    }
+		  
+		  token = strtok (0, " ");
+		}
+	      add_proc(pid, ppid, ujiffies, sjiffies, vsize);
+	    }
+	}
+    }
+  
+  (void) closedir (dir);
+  free (buffer);
+  if (empty)
+    {
+      fprintf (stderr, "%s is empty (not mounted ?)\n", PROC_BASE) ;
+      exit (1);
+    }
+}
+
+/*------------------------------------------------------------------------*/
+static void
+sample_children (CHILD *cptr, double *time_ptr, double *mb_ptr)
+{
+  while (cptr)
+    {
+#ifdef DEBUG
+      fprintf(log, "ujiffies %lu\n", cptr->child->ujiffies); 
+      fprintf(log, "sjiffies %lu\n", cptr->child->sjiffies); 
+      fprintf(log, "result %f\n", (cptr->child->ujiffies + cptr->child->sjiffies) / HZ);
+      fprintf(log, "timeptr %f\n", *time_ptr);
+      fprintf(log, "pid: %d vsize %lu\n", cptr->child->pid, cptr->child->vsize);
+#endif
+
+      *time_ptr += (cptr->child->ujiffies + cptr->child->sjiffies) / (double) HZ;
+      *mb_ptr += cptr->child->vsize / (double) (1 << 20);
+
+#ifdef DEBUG
+      fprintf(log, "timeptr(new) %f\n", *time_ptr);
+#endif
+
+      if (cptr->child->children)
+	sample_children(cptr->child->children, time_ptr, mb_ptr);
+      cptr = cptr->next;
+    }
+  return;
+}
+
+/*------------------------------------------------------------------------*/
+/* 
+ * should trace the memory and jiffies consumption recursively
+ * 1. calls read_proc
+ * 2. calls find_proc with pid
+ * 3. goes through all the children
+ */
+static int
+sample_recursive (double *time_ptr, double *mb_ptr)
+{
+  PROC *pr;
+  read_proc();
+  pr = find_proc(child_pid);
+
+  if (!pr)
+    return 0;
+
+  *time_ptr = (pr->ujiffies + pr->sjiffies) / (double) HZ;
+  *mb_ptr = pr->vsize / (double) (1 << 20);
+
+  if (pr->children)
+    sample_children(pr->children, time_ptr, mb_ptr);
+
+  return 1;
+}
 
 /*------------------------------------------------------------------------*/
 
@@ -233,7 +515,6 @@ sample (double *time_ptr, double *mb_ptr)
   size_t size, pos;
   unsigned vsize;
   FILE *file;
-
 
   sprintf (name, "/proc/%d/stat", child_pid);
   file = fopen (name, "r");
@@ -353,7 +634,11 @@ sampler (int s)
   assert (s == SIGALRM);
   num_samples++;
 
-  res = sample (&time, &mb);
+  if (trace_children)
+    res = sample_recursive (&time, &mb);
+  else
+    res = sample (&time, &mb);
+
   if (res && mb > max_mb)
     max_mb = mb;
 
@@ -408,6 +693,7 @@ main (int argc, char **argv)
   s = 0;			/* signal caught */
   time_limit = 60 * 60 * 24;	/* one day */
   space_limit = get_physical_mb ();	/* physical memory size */
+  trace_children = 0;
 
   for (i = 1; i < argc; i++)
     {
@@ -420,6 +706,10 @@ main (int argc, char **argv)
 	  else if (strstr (argv[i], "--time-limit=") == argv[i])
 	    {
 	      time_limit = parse_number_rhs (argv[i]);
+	    }
+	  else if (!strcmp (argv[i], "--trace-children"))
+	    {
+	      trace_children = 1;
 	    }
 	  else if (argv[i][1] == 's')
 	    {

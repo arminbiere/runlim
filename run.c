@@ -47,6 +47,7 @@ typedef struct _proc
   int highlight;
   long unsigned ujiffies, sjiffies;
   long unsigned vsize;
+  long rsize;
   struct _child *children;
   struct _proc *parent;
   struct _proc *next;
@@ -249,6 +250,7 @@ static double max_mb = -1;
 #define STIME_POS 13
 #define UTIME_POS 14
 #define VSIZE_POS 22
+#define RSIZE_POS 23
 
 /*------------------------------------------------------------------------*/
 
@@ -258,7 +260,7 @@ static unsigned time_limit, space_limit, trace_children;
 
 static PROC *
 new_proc (pid_t pid, pid_t ppid, long unsigned sjiffies, 
-	  long unsigned ujiffies, unsigned vsize)
+	  long unsigned ujiffies, unsigned long vsize, long rsize)
 {
   PROC *new;
 
@@ -272,6 +274,7 @@ new_proc (pid_t pid, pid_t ppid, long unsigned sjiffies,
   new->sjiffies = sjiffies;
   new->ujiffies = ujiffies;
   new->vsize = vsize;
+  new->rsize = rsize;
   new->highlight = 0;
   new->children = NULL;
   new->parent = NULL;
@@ -317,18 +320,19 @@ find_proc (pid_t pid)
 
 static void
 add_proc (pid_t pid, pid_t ppid, long unsigned sjiffies, 
-	  long unsigned ujiffies, unsigned vsize)
+	  long unsigned ujiffies, unsigned long vsize, long rsize)
 {
   PROC *this, *parent;
 
   if (!(this = find_proc (pid)))
-    this = new_proc (pid, ppid, sjiffies, ujiffies, vsize);
+    this = new_proc (pid, ppid, sjiffies, ujiffies, vsize, rsize);
   else
     {
-      /* was already there, update sjiffies, ujiffies and vsize */
+      /* was already there, update sjiffies, ujiffies, vsize, rsize */
       this->sjiffies = sjiffies;
       this->ujiffies = ujiffies;
       this->vsize = vsize;
+      this->rsize = rsize;
       if (this->ppid != ppid)
 	{
 	  /* parent added before with ppid 0 */
@@ -341,7 +345,7 @@ add_proc (pid_t pid, pid_t ppid, long unsigned sjiffies,
     ppid = 0;
 
   if (!(parent = find_proc (ppid)))
-    parent = new_proc (ppid, 0, 0, 0, 0);
+    parent = new_proc (ppid, 0, 0, 0, 0, 0);
 
   add_child (parent, this);
   this->parent = parent;
@@ -362,7 +366,8 @@ read_proc ()
   pid_t pid, ppid;
   int i, ch, tmp, size, pos, num_valid_results, empty;
   long unsigned ujiffies, sjiffies;
-  unsigned vsize;
+  unsigned long vsize;
+  long rsize;
 
   buffer = malloc (size = 100);
 
@@ -399,6 +404,7 @@ read_proc ()
 	      ujiffies = sjiffies = -1;
 	      num_valid_results = 0;
 	      vsize = 0;
+	      rsize = 0;
 	      
 	      token = strtok (buffer, " ");
 	      i = 0;
@@ -408,8 +414,11 @@ read_proc ()
 		  switch (i++)
 		    {
 		    case VSIZE_POS:
-		      sscanf (token, "%u", &vsize);
+		      sscanf (token, "%lu", &vsize);
 		      break;
+		    case RSIZE_POS:
+		       sscanf (token, "%ld", &rsize);
+		       break;
 		    case PID_POS:
 		      assert (atoi (token) == pid);
 		      break;
@@ -436,7 +445,7 @@ read_proc ()
 		  
 		  token = strtok (0, " ");
 		}
-	      add_proc(pid, ppid, ujiffies, sjiffies, vsize);
+	      add_proc(pid, ppid, ujiffies, sjiffies, vsize, rsize);
 	    }
 	}
     }
@@ -465,7 +474,11 @@ sample_children (CHILD *cptr, double *time_ptr, double *mb_ptr)
 #endif
 
       *time_ptr += (cptr->child->ujiffies + cptr->child->sjiffies) / (double) HZ;
+#if 0
       *mb_ptr += cptr->child->vsize / (double) (1 << 20);
+#else
+      *mb_ptr += cptr->child->rsize / (double) (1 << 8);
+#endif
 
 #ifdef DEBUG
       fprintf(log, "timeptr(new) %f\n", *time_ptr);
@@ -496,7 +509,11 @@ sample_recursive (double *time_ptr, double *mb_ptr)
     return 0;
 
   *time_ptr = (pr->ujiffies + pr->sjiffies) / (double) HZ;
+#if 0
   *mb_ptr = pr->vsize / (double) (1 << 20);
+#else
+  *mb_ptr = pr->rsize / (double) (1 << 8);
+#endif
 
   if (pr->children)
     sample_children(pr->children, time_ptr, mb_ptr);
@@ -512,8 +529,9 @@ sample (double *time_ptr, double *mb_ptr)
   int ch, i, tmp, num_valid_results;
   char name[80], *buffer, *token;
   double ujiffies, sjiffies;
+  unsigned long vsize;
   size_t size, pos;
-  unsigned vsize;
+  long rsize;
   FILE *file;
 
   sprintf (name, "/proc/%d/stat", child_pid);
@@ -538,6 +556,7 @@ sample (double *time_ptr, double *mb_ptr)
   ujiffies = sjiffies = -1;
   num_valid_results = 0;
   vsize = 0;
+  rsize = 0;
 
   token = strtok (buffer, " ");
   i = 0;
@@ -547,9 +566,16 @@ sample (double *time_ptr, double *mb_ptr)
       switch (i++)
 	{
 	case VSIZE_POS:
-	  if (sscanf (token, "%u", &vsize) == 1)
+	  if (sscanf (token, "%lu", &vsize) == 1)
 	    {
 	      *mb_ptr = vsize / (double) (1 << 20);
+	      num_valid_results++;
+	    }
+	  break;
+	case RSIZE_POS:
+	  if (sscanf (token, "%ld", &rsize) == 1)
+	    {
+	      *mb_ptr = vsize / (double) (1 << 8);
 	      num_valid_results++;
 	    }
 	  break;

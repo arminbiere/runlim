@@ -241,7 +241,8 @@ static int child_pid = -1;
 static int parent_pid = -1;
 static int num_samples_since_last_report = 0;
 static unsigned num_samples = 0;
-static double max_mb = -1;
+static double max_mb = 0;
+static double max_seconds = 0;
 
 /*------------------------------------------------------------------------*/
 
@@ -619,24 +620,6 @@ sample (double *time_ptr, double *mb_ptr)
 
 /*------------------------------------------------------------------------*/
 
-static double
-get_time (void)
-{
-  double res, utime, stime;
-  struct rusage u;
-
-  if (getrusage (RUSAGE_CHILDREN, &u))
-    return -1;
-
-  utime = u.ru_stime.tv_sec + 10e-7 * (double) u.ru_stime.tv_usec;
-  stime = u.ru_utime.tv_sec + 10e-7 * (double) u.ru_utime.tv_usec;
-  res = utime + stime;
-
-  return res;
-}
-
-/*------------------------------------------------------------------------*/
-
 static void
 report (double time, double mb)
 {
@@ -666,8 +649,14 @@ sampler (int s)
   else
     res = sample (&time, &mb);
 
-  if (res && mb > max_mb)
-    max_mb = mb;
+  if (res)
+    { 
+      if (mb > max_mb)
+	max_mb = mb;
+
+      if (time > max_seconds)
+	max_seconds = time;
+    }
 
   if (++num_samples_since_last_report >= REPORT_RATE)
     {
@@ -719,7 +708,6 @@ main (int argc, char **argv)
 {
   int i, j, res, status, s, ok;
   struct rlimit l;
-  double seconds;
   const char *p;
   time_t t;
 
@@ -894,9 +882,7 @@ main (int argc, char **argv)
   fprintf (log, "[run] end:\t\t%s", ctime (&t));
   fprintf (log, "[run] status:\t\t");
 
-  seconds = get_time ();
-
-  if (seconds >= time_limit)
+  if (max_seconds >= time_limit)
     goto FORCE_OUT_OF_TIME_ENTRY;
 
   switch (ok)
@@ -934,7 +920,7 @@ FORCE_OUT_OF_TIME_ENTRY:
   fprintf (log, "[run] result:\t\t%d\n", res);
   fflush (log);
 
-  fprintf (log, "[run] time:\t\t%.2f seconds\n", seconds);
+  fprintf (log, "[run] time:\t\t%.2f seconds\n", max_seconds);
   fprintf (log, "[run] space:\t\t%.1f MB\n", max_mb);
   fprintf (log, "[run] samples:\t\t%u\n", num_samples);
 

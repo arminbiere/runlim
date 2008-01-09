@@ -674,6 +674,8 @@ sampler (int s)
 	  kill (child_pid, SIGXCPU);
 #else
 	  kill (child_pid, SIGTERM);
+	  kill (child_pid, SIGTERM);
+	  kill (child_pid, SIGTERM);
 #endif
 	}
       else if (mb > space_limit)
@@ -682,6 +684,8 @@ sampler (int s)
 #if 0
 	  kill (child_pid, SIGXFSZ);
 #else
+	  kill (child_pid, SIGTERM);
+	  kill (child_pid, SIGTERM);
 	  kill (child_pid, SIGTERM);
 #endif
 	}

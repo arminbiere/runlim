@@ -84,8 +84,6 @@ typedef enum Status Status;
 "\n" \
 "    --time-limit=<number>    set time limit to <number> seconds\n" \
 "\n" \
-"    --trace-children         run time and memory usage of children included\n" \
-"\n" \
 "The program is the name of an executable followed by its arguments.\n"
 
 /*------------------------------------------------------------------------*/
@@ -255,7 +253,7 @@ static double max_seconds = 0;
 
 /*------------------------------------------------------------------------*/
 
-static unsigned time_limit, space_limit, trace_children;
+static unsigned time_limit, space_limit;
 
 /*------------------------------------------------------------------------*/
 
@@ -524,102 +522,6 @@ sample_recursive (double *time_ptr, double *mb_ptr)
 
 /*------------------------------------------------------------------------*/
 
-static int
-sample (double *time_ptr, double *mb_ptr)
-{
-  int ch, i, tmp, num_valid_results;
-  char name[80], *buffer, *token;
-  double ujiffies, sjiffies;
-  unsigned long vsize;
-  size_t size, pos;
-  long rsize;
-  FILE *file;
-
-  sprintf (name, "/proc/%d/stat", child_pid);
-  file = fopen (name, "r");
-  if (!file)
-    return 0;
-
-  buffer = malloc (size = 100);
-  num_valid_results = 0;
-  pos = 0;
-
-  while ((ch = getc (file)) != EOF)
-    {
-      if (pos >= size - 1)
-	buffer = realloc (buffer, size *= 2);
-
-      buffer[pos++] = ch;
-    }
-
-  fclose (file);
-
-  ujiffies = sjiffies = -1;
-  num_valid_results = 0;
-  vsize = 0;
-  rsize = 0;
-
-  token = strtok (buffer, " ");
-  i = 0;
-
-  while (token)
-    {
-      switch (i++)
-	{
-	case VSIZE_POS:
-	  if (sscanf (token, "%lu", &vsize) == 1)
-	    {
-	      *mb_ptr = vsize / (double) (1 << 20);
-	      num_valid_results++;
-	    }
-	  break;
-	case RSIZE_POS:
-	  if (sscanf (token, "%ld", &rsize) == 1)
-	    {
-	      *mb_ptr = vsize / (double) (1 << 8);
-	      num_valid_results++;
-	    }
-	  break;
-	case PID_POS:
-	  assert (atoi (token) == child_pid);
-	  break;
-	case PPID_POS:
-	  assert (atoi (token) == parent_pid);
-	  break;
-	case STIME_POS:
-	  if (sscanf (token, "%d", &tmp) == 1)
-	    {
-	      sjiffies = tmp;
-	      assert (sjiffies >= 0);
-	    }
-	  break;
-	case UTIME_POS:
-	  if (sscanf (token, "%d", &tmp) == 1)
-	    {
-	      ujiffies = tmp;
-	      assert (usage >= 0);
-	    }
-	  break;
-	default:
-	  break;
-	}
-
-      token = strtok (0, " ");
-    }
-
-  if (ujiffies >= 0 && sjiffies >= 0)
-    {
-      num_valid_results++;
-      *time_ptr = (ujiffies + sjiffies) / HZ;
-    }
-
-  free (buffer);
-
-  return num_valid_results == 2;
-}
-
-/*------------------------------------------------------------------------*/
-
 static void
 report (double time, double mb)
 {
@@ -636,6 +538,29 @@ static int caught_out_of_time;
 /*------------------------------------------------------------------------*/
 
 static void
+really_kill_child (void)
+{
+#if 0
+  kill (child_pid, SIGXCPU);
+#else
+  int sig;
+  kill (child_pid, SIGTERM);
+  kill (child_pid, SIGTERM);
+  kill (child_pid, SIGTERM);
+  kill (child_pid, SIGKILL);
+  kill (child_pid, SIGKILL);
+  kill (child_pid, SIGKILL);
+#if 0
+  sleep (1);
+  for (sig = 1; sig <= 15; sig++)
+    kill (child_pid, sig);
+#endif
+#endif
+}
+
+/*------------------------------------------------------------------------*/
+
+static void
 sampler (int s)
 {
   double mb, time;
@@ -644,10 +569,7 @@ sampler (int s)
   assert (s == SIGALRM);
   num_samples++;
 
-  if (trace_children)
-    res = sample_recursive (&time, &mb);
-  else
-    res = sample (&time, &mb);
+  res = sample_recursive (&time, &mb);
 
   if (res)
     { 
@@ -670,24 +592,12 @@ sampler (int s)
       if (time > time_limit)
 	{
 	  caught_out_of_time = 1;
-#if 0
-	  kill (child_pid, SIGXCPU);
-#else
-	  kill (child_pid, SIGTERM);
-	  kill (child_pid, SIGTERM);
-	  kill (child_pid, SIGTERM);
-#endif
+	  really_kill_child ();
 	}
       else if (mb > space_limit)
 	{
 	  caught_out_of_memory = 1;
-#if 0
-	  kill (child_pid, SIGXFSZ);
-#else
-	  kill (child_pid, SIGTERM);
-	  kill (child_pid, SIGTERM);
-	  kill (child_pid, SIGTERM);
-#endif
+	  really_kill_child ();
 	}
     }
 }
@@ -719,7 +629,6 @@ main (int argc, char **argv)
   s = 0;			/* signal caught */
   time_limit = 60 * 60 * 24;	/* one day */
   space_limit = get_physical_mb ();	/* physical memory size */
-  trace_children = 0;
 
   for (i = 1; i < argc; i++)
     {
@@ -733,10 +642,6 @@ main (int argc, char **argv)
 	    {
 	      time_limit = parse_number_rhs (argv[i]);
 	    }
-	  else if (!strcmp (argv[i], "--trace-children"))
-	    {
-	      trace_children = 1;
-	    }
 	  else if (argv[i][1] == 's')
 	    {
 	      space_limit = parse_number_argument (&i, argc, argv);
@@ -745,16 +650,14 @@ main (int argc, char **argv)
 	    {
 	      space_limit = parse_number_rhs (argv[i]);
 	    }
-	  else
-	    if (strcmp (argv[i], "-v") == 0
-		|| strcmp (argv[i], "--version") == 0)
+	  else if (strcmp (argv[i], "-v") == 0 ||
+	           strcmp (argv[i], "--version") == 0)
 	    {
 	      printf ("%s\n", VERSION);
 	      exit (0);
 	    }
-	  else
-	    if (strcmp (argv[i], "-h") == 0
-		|| strcmp (argv[i], "--help") == 0)
+	  else if (strcmp (argv[i], "-h") == 0 ||
+	           strcmp (argv[i], "--help") == 0)
 	    {
 	      usage ();
 	      exit (0);

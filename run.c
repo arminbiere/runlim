@@ -738,6 +738,7 @@ main (int argc, char **argv)
 		case SIGBUS:
 		  ok = BUS_ERROR;
 		  break;
+		case SIGKILL:
 		case SIGTERM:
 		  if (caught_out_of_memory)
 		    ok = OUT_OF_MEMORY;

@@ -540,14 +540,16 @@ static int caught_out_of_time;
 static void
 really_kill_child (void)
 {
-  int i;
   kill (child_pid, SIGTERM);
+  usleep (10);
   kill (child_pid, SIGTERM);
+  usleep (10);
   kill (child_pid, SIGTERM);
-  for (i = 0; i < 10000000; i++)
-    ;
+  usleep (100);
   kill (child_pid, SIGKILL);
+  usleep (10);
   kill (child_pid, SIGKILL);
+  usleep (10);
   kill (child_pid, SIGKILL);
 }
 

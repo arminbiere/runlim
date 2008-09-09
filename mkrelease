@@ -1,0 +1,8 @@
+#!/bin/sh
+version=`cat VERSION`
+rm -rf /tmp/run-$version
+mkdir /tmp/run-$version
+cp run.c VERSION Makefile.in configure LICENSE /tmp/run-$version
+cd /tmp
+tar zcvf run-$version.tar.gz run-$version
+ls -l /tmp/run-$version.tar.gz

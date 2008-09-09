@@ -1,0 +1,12 @@
+This Linux program can be used to 'run' and control 
+benchmarks.
+
+It samples the resource usage of the executed program
+and all its child processes and stops the program
+if resource limits are exhausted.
+
+To compile:
+
+./configure && make
+
+Also see LICENSE.

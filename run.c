@@ -84,6 +84,8 @@ typedef enum Status Status;
 "\n" \
 "    --time-limit=<number>    set time limit to <number> seconds\n" \
 "\n" \
+"    -k|--kill                propagate signals\n" \
+"\n" \
 "The program is the name of an executable followed by its arguments.\n"
 
 /*------------------------------------------------------------------------*/
@@ -241,6 +243,7 @@ static int num_samples_since_last_report = 0;
 static unsigned num_samples = 0;
 static double max_mb = 0;
 static double max_seconds = 0;
+static int propagate_signals = 0;
 
 /*------------------------------------------------------------------------*/
 
@@ -651,6 +654,11 @@ main (int argc, char **argv)
 	      printf ("%s\n", VERSION);
 	      exit (0);
 	    }
+	  else if (strcmp (argv[i], "-k") == 0 ||
+	           strcmp (argv[i], "--kill") == 0)
+	    {
+	      propagate_signals = 1;
+	    }
 	  else if (strcmp (argv[i], "-h") == 0 ||
 	           strcmp (argv[i], "--help") == 0)
 	    {
@@ -829,6 +837,22 @@ FORCE_OUT_OF_TIME_ENTRY:
 
   fflush (log);
 
-  exit (res);
+  if (propagate_signals)
+    {
+      switch (ok)
+	{
+	case OK:
+	case OUT_OF_TIME:
+	case OUT_OF_MEMORY:
+	case FORK_FAILED:
+	case INTERNAL_ERROR:
+	case EXEC_FAILED:
+	  break;
+	default:
+	  kill (parent_pid, s);
+	  break;
+	}
+    }
+
   return res;
 }

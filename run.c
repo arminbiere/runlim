@@ -19,7 +19,6 @@
 
 #define SAMPLE_RATE 100000	/* in milliseconds */
 #define REPORT_RATE 10		/* in terms of sampling */
-
 #define COMM_LEN 16
 
 /*------------------------------------------------------------------------*/
@@ -244,6 +243,7 @@ static unsigned num_samples = 0;
 static double max_mb = 0;
 static double max_seconds = 0;
 static int propagate_signals = 0;
+static int children = 0;
 
 /*------------------------------------------------------------------------*/
 
@@ -380,76 +380,72 @@ read_proc ()
     }
 
   empty = 1;
+SKIP:
   while ((de = readdir (dir)) != NULL)
     {
       empty = 0;
-      if ((pid = (pid_t) atoi (de->d_name)) != 0)
+      if ((pid = (pid_t) atoi (de->d_name)) == 0) continue;
+      if (!(path = malloc (strlen (PROC_BASE) + strlen (de->d_name) + 10)))
+	continue;
+      sprintf (path, "%s/%d/stat", PROC_BASE, pid);
+      file = fopen (path, "r");
+      free (path);
+      if (!file) continue;
+      num_valid_results = 0;
+      pos = 0;
+      
+      while ((ch = getc (file)) != EOF)
 	{
-	  if (!(path = malloc (strlen (PROC_BASE) + strlen (de->d_name) + 10)))
-	    exit (2);
-	  sprintf (path, "%s/%d/stat", PROC_BASE, pid);
-	  if ((file = fopen (path, "r")) != NULL)
-	    {
-	      num_valid_results = 0;
-	      pos = 0;
-	      
-	      while ((ch = getc (file)) != EOF)
-		{
-		  if (pos >= size - 1)
-		    buffer = realloc (buffer, size *= 2);
-		  
-		  buffer[pos++] = ch;
-		}
-	      
-	      fclose (file);
-	      
-	      ujiffies = sjiffies = -1;
-	      num_valid_results = 0;
-	      vsize = 0;
-	      rsize = 0;
-	      
-	      token = strtok (buffer, " ");
-	      i = 0;
-	      
-	      while (token)
-		{
-		  switch (i++)
-		    {
-		    case VSIZE_POS:
-		      sscanf (token, "%lu", &vsize);
-		      break;
-		    case RSIZE_POS:
-		       sscanf (token, "%ld", &rsize);
-		       break;
-		    case PID_POS:
-		      assert (atoi (token) == pid);
-		      break;
-		    case PPID_POS:
-		      sscanf (token, "%d", &ppid);
-		      break;
-		    case STIME_POS:
-		      if (sscanf (token, "%d", &tmp) == 1)
-			{
-			  sjiffies = tmp;
-			  assert (sjiffies >= 0);
-			}
-		      break;
-		    case UTIME_POS:
-		      if (sscanf (token, "%d", &tmp) == 1)
-			{
-			  ujiffies = tmp;
-			  assert (usage >= 0);
-			}
-		      break;
-		    default:
-		      break;
-		    }
-		  
-		  token = strtok (0, " ");
-		}
-	      add_proc(pid, ppid, ujiffies, sjiffies, vsize, rsize);
-	    }
+	  if (pos >= size - 1)
+	    buffer = realloc (buffer, size *= 2);
+	  
+	  buffer[pos++] = ch;
 	}
+      
+      fclose (file);
+      
+      ujiffies = sjiffies = -1;
+      num_valid_results = 0;
+      vsize = 0;
+      rsize = 0;
+      
+      token = strtok (buffer, " ");
+      i = 0;
+      
+      while (token)
+	{
+	  switch (i++)
+	    {
+	    case VSIZE_POS:
+	      if (sscanf (token, "%lu", &vsize) != 1) goto SKIP;
+	      break;
+	    case RSIZE_POS:
+	       if (sscanf (token, "%ld", &rsize) != 1) goto SKIP;
+	       break;
+	    case PID_POS:
+	      if (atoi (token) != pid) goto SKIP;
+	      break;
+	    case PPID_POS:
+	      if (sscanf (token, "%d", &ppid) != 1) goto SKIP;
+	      break;
+	    case STIME_POS:
+	      if (sscanf (token, "%d", &tmp) != 1) goto SKIP;
+	      sjiffies = tmp;
+	      assert (sjiffies >= 0);
+	      break;
+	    case UTIME_POS:
+	      if (sscanf (token, "%d", &tmp) != 1) goto SKIP;
+	      ujiffies = tmp;
+	      assert (usage >= 0);
+	      break;
+	    default:
+	      break;
+	    }
+	  
+	  token = strtok (0, " ");
+	}
+      if (ujiffies < 0 || sjiffies < 0) goto SKIP;
+      add_proc(pid, ppid, ujiffies, sjiffies, vsize, rsize);
     }
   
   (void) closedir (dir);
@@ -462,15 +458,17 @@ read_proc ()
 }
 
 /*------------------------------------------------------------------------*/
+
 static void
 sample_children (CHILD *cptr, double *time_ptr, double *mb_ptr)
 {
   while (cptr)
     {
+      children++;
 #ifdef DEBUG
       fprintf(log, "ujiffies %lu\n", cptr->child->ujiffies); 
       fprintf(log, "sjiffies %lu\n", cptr->child->sjiffies); 
-      fprintf(log, "result %f\n", (cptr->child->ujiffies + cptr->child->sjiffies) / HZ);
+      fprintf(log, "result %f\n", (cptr->child->ujiffies + cptr->child->sjiffies) / (double)HZ);
       fprintf(log, "timeptr %f\n", *time_ptr);
       fprintf(log, "pid: %d vsize %lu\n", cptr->child->pid, cptr->child->vsize);
 #endif
@@ -719,7 +717,7 @@ main (int argc, char **argv)
       else
 	{
 	  status = 0;
-	  fprintf (log, "[run] child pid:\t%d\n", (int) child_pid);
+	  fprintf (log, "[run] main pid:\t%d\n", (int) child_pid);
 	  fflush (log);
 
 	  assert (SAMPLE_RATE < 1000000);
@@ -831,7 +829,9 @@ FORCE_OUT_OF_TIME_ENTRY:
   fprintf (log, "[run] result:\t\t%d\n", res);
   fflush (log);
 
+  fprintf (log, "[run] children:\t\t%d\n", children);
   fprintf (log, "[run] time:\t\t%.2f seconds\n", max_seconds);
+  //TODO: fprintf (log, "[run] real:\t\t%.2f seconds\n", 0);
   fprintf (log, "[run] space:\t\t%.1f MB\n", max_mb);
   fprintf (log, "[run] samples:\t\t%u\n", num_samples);
 

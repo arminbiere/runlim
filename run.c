@@ -600,6 +600,21 @@ sampler (int s)
 
 /*------------------------------------------------------------------------*/
 
+static double
+realtime (void)
+{
+  double res = -1;
+  struct timeval tv;
+  if (!gettimeofday (&tv, 0))
+    {
+      res = 1e-6 * tv.tv_usec;
+      res += tv.tv_sec;
+    }
+  return res;
+}
+
+/*------------------------------------------------------------------------*/
+
 static int caught_usr1_signal = 0;
 
 /*------------------------------------------------------------------------*/
@@ -617,6 +632,7 @@ int
 main (int argc, char **argv)
 {
   int i, j, res, status, s, ok;
+  double start, real;
   struct rlimit l;
   const char *p;
   time_t t;
@@ -707,6 +723,7 @@ main (int argc, char **argv)
   signal (SIGUSR1, sig_usr1_handler);
   parent_pid = getpid ();
 
+  start = realtime();
   if ((child_pid = fork ()) != 0)
     {
       if (child_pid < 0)
@@ -784,6 +801,15 @@ main (int argc, char **argv)
       exit (1);
     }
 
+  if (start >= 0)
+    {
+      real = realtime () - start;
+      if (real < 0)
+	real = 0;
+    }
+  else
+    real = -1;
+
   if (caught_usr1_signal)
     ok = EXEC_FAILED;
 
@@ -830,6 +856,7 @@ FORCE_OUT_OF_TIME_ENTRY:
   fflush (log);
 
   fprintf (log, "[run] children:\t\t%d\n", children);
+  fprintf (log, "[run] real:\t\t%.2f seconds\n", real);
   fprintf (log, "[run] time:\t\t%.2f seconds\n", max_seconds);
   //TODO: fprintf (log, "[run] real:\t\t%.2f seconds\n", 0);
   fprintf (log, "[run] space:\t\t%.1f MB\n", max_mb);

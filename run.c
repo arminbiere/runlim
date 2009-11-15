@@ -780,7 +780,7 @@ main (int argc, char **argv)
 		  break;
 		}
 
-	      res = 1;
+	      res = 128 + s;
 	    }
 	  else
 	    {

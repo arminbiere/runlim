@@ -752,13 +752,17 @@ main (int argc, char **argv)
 	    res = WEXITSTATUS (status);
 	  else if (WIFSIGNALED (status))
 	    {
+	      res = 128 + s;
+
 	      switch ((s = WTERMSIG (status)))
 		{
 		case SIGXFSZ:
 		  ok = OUT_OF_MEMORY;
+		  res = 1;
 		  break;
 		case SIGXCPU:
 		  ok = OUT_OF_TIME;
+		  res = 1;
 		  break;
 		case SIGSEGV:
 		  ok = SEGMENTATION_FAULT;
@@ -779,8 +783,6 @@ main (int argc, char **argv)
 		  ok = OTHER_SIGNAL;
 		  break;
 		}
-
-	      res = 128 + s;
 	    }
 	  else
 	    {
@@ -828,6 +830,7 @@ main (int argc, char **argv)
     case OUT_OF_TIME:
 FORCE_OUT_OF_TIME_ENTRY:
       fputs ("out of time", log);
+      res = 1;
       break;
     case OUT_OF_MEMORY:
       fputs ("out of memory", log);
@@ -858,7 +861,6 @@ FORCE_OUT_OF_TIME_ENTRY:
   fprintf (log, "[run] children:\t\t%d\n", children);
   fprintf (log, "[run] real:\t\t%.2f seconds\n", real);
   fprintf (log, "[run] time:\t\t%.2f seconds\n", max_seconds);
-  //TODO: fprintf (log, "[run] real:\t\t%.2f seconds\n", 0);
   fprintf (log, "[run] space:\t\t%.1f MB\n", max_mb);
   fprintf (log, "[run] samples:\t\t%u\n", num_samples);
 

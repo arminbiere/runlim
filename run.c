@@ -758,26 +758,15 @@ main (int argc, char **argv)
 		{
 		case SIGXFSZ:
 		  ok = OUT_OF_MEMORY;
-		  res = 1;
 		  break;
 		case SIGXCPU:
 		  ok = OUT_OF_TIME;
-		  res = 1;
 		  break;
 		case SIGSEGV:
 		  ok = SEGMENTATION_FAULT;
 		  break;
 		case SIGBUS:
 		  ok = BUS_ERROR;
-		  break;
-		case SIGKILL:
-		case SIGTERM:
-		  if (caught_out_of_memory)
-		    ok = OUT_OF_MEMORY;
-		  else if (caught_out_of_time)
-		    ok = OUT_OF_TIME;
-		  else
-		    ok = OTHER_SIGNAL;
 		  break;
 		default:
 		  ok = OTHER_SIGNAL;
@@ -803,6 +792,7 @@ main (int argc, char **argv)
       exit (1);
     }
 
+
   if (start >= 0)
     {
       real = realtime () - start;
@@ -814,6 +804,10 @@ main (int argc, char **argv)
 
   if (caught_usr1_signal)
     ok = EXEC_FAILED;
+  else if (caught_out_of_memory)
+    ok = OUT_OF_MEMORY;
+  else if (caught_out_of_time)
+    ok = OUT_OF_TIME;
 
   t = time (0);
   fprintf (log, "[run] end:\t\t%s", ctime (&t));
@@ -834,6 +828,7 @@ FORCE_OUT_OF_TIME_ENTRY:
       break;
     case OUT_OF_MEMORY:
       fputs ("out of memory", log);
+      res = 1;
       break;
     case SEGMENTATION_FAULT:
       fputs ("segmentation fault", log);

@@ -541,6 +541,7 @@ static int caught_out_of_time;
 static void
 really_kill_child (void)
 {
+  usleep (10);
   kill (child_pid, SIGTERM);
   usleep (10);
   kill (child_pid, SIGTERM);
@@ -752,9 +753,9 @@ main (int argc, char **argv)
 	    res = WEXITSTATUS (status);
 	  else if (WIFSIGNALED (status))
 	    {
+	      s = WTERMSIG (status);
 	      res = 128 + s;
-
-	      switch ((s = WTERMSIG (status)))
+	      switch (s)
 		{
 		case SIGXFSZ:
 		  ok = OUT_OF_MEMORY;

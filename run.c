@@ -256,7 +256,7 @@ static int children = 0;
 
 /*------------------------------------------------------------------------*/
 
-static unsigned time_limit, real_time_limit, space_limit;
+static unsigned start_time, time_limit, real_time_limit, space_limit;
 
 /*------------------------------------------------------------------------*/
 
@@ -557,6 +557,32 @@ really_kill_child (void)
 
 /*------------------------------------------------------------------------*/
 
+static double
+wall_clock_time (void)
+{
+  double res = -1;
+  struct timeval tv;
+  if (!gettimeofday (&tv, 0))
+    {
+      res = 1e-6 * tv.tv_usec;
+      res += tv.tv_sec;
+    }
+  return res;
+}
+
+/*------------------------------------------------------------------------*/
+
+static double
+real_time (void) 
+{
+  double res;
+  if (start_time < 0) return -1;
+  res = wall_clock_time() - start_time;
+  return res;
+}
+
+/*------------------------------------------------------------------------*/
+
 static void
 sampler (int s)
 {
@@ -586,7 +612,7 @@ sampler (int s)
 
   if (res)
     {
-      if (time > time_limit || time > real_time_limit)
+      if (time > time_limit || real_time () > real_time_limit)
 	{
 	  caught_out_of_time = 1;
 	  really_kill_child ();
@@ -597,21 +623,6 @@ sampler (int s)
 	  really_kill_child ();
 	}
     }
-}
-
-/*------------------------------------------------------------------------*/
-
-static double
-realtime (void)
-{
-  double res = -1;
-  struct timeval tv;
-  if (!gettimeofday (&tv, 0))
-    {
-      res = 1e-6 * tv.tv_usec;
-      res += tv.tv_sec;
-    }
-  return res;
 }
 
 /*------------------------------------------------------------------------*/
@@ -633,9 +644,9 @@ int
 main (int argc, char **argv)
 {
   int i, j, res, status, s, ok;
-  double start, real;
   struct rlimit l;
   const char *p;
+  double real;
   time_t t;
 
   ok = OK;				/* status of the run */
@@ -734,7 +745,7 @@ main (int argc, char **argv)
   signal (SIGUSR1, sig_usr1_handler);
   parent_pid = getpid ();
 
-  start = realtime();
+  start_time = wall_clock_time();
   if ((child_pid = fork ()) != 0)
     {
       if (child_pid < 0)
@@ -807,14 +818,7 @@ main (int argc, char **argv)
     }
 
 
-  if (start >= 0)
-    {
-      real = realtime () - start;
-      if (real < 0)
-	real = 0;
-    }
-  else
-    real = -1;
+  real = real_time ();
 
   if (caught_usr1_signal)
     ok = EXEC_FAILED;

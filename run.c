@@ -256,7 +256,7 @@ static int children = 0;
 
 /*------------------------------------------------------------------------*/
 
-static unsigned time_limit, space_limit;
+static unsigned time_limit, real_time_limit, space_limit;
 
 /*------------------------------------------------------------------------*/
 
@@ -586,7 +586,7 @@ sampler (int s)
 
   if (res)
     {
-      if (time > time_limit)
+      if (time > time_limit || time > real_time_limit)
 	{
 	  caught_out_of_time = 1;
 	  really_kill_child ();
@@ -638,9 +638,10 @@ main (int argc, char **argv)
   const char *p;
   time_t t;
 
-  ok = OK;			/* status of the run */
-  s = 0;			/* signal caught */
-  time_limit = 60 * 60 * 24;	/* one day */
+  ok = OK;				/* status of the run */
+  s = 0;				/* signal caught */
+  time_limit = 60 * 60 * 24 * 3600;	/* one year */
+  real_time_limit = time_limit;
   space_limit = get_physical_mb ();	/* physical memory size */
 
   for (i = 1; i < argc; i++)
@@ -654,6 +655,14 @@ main (int argc, char **argv)
 	  else if (strstr (argv[i], "--time-limit=") == argv[i])
 	    {
 	      time_limit = parse_number_rhs (argv[i]);
+	    }
+	  else if (argv[i][1] == 'r')
+	    {
+	      real_time_limit = parse_number_argument (&i, argc, argv);
+	    }
+	  else if (strstr (argv[i], "--real-time-limit=") == argv[i])
+	    {
+	      real_time_limit = parse_number_rhs (argv[i]);
 	    }
 	  else if (argv[i][1] == 's')
 	    {
@@ -714,6 +723,7 @@ main (int argc, char **argv)
     log = stderr;
 
   fprintf (log, "[run] time limit:\t%u seconds\n", time_limit);
+  fprintf (log, "[run] real time limit:\t%u seconds\n", real_time_limit);
   fprintf (log, "[run] space limit:\t%u MB\n", space_limit);
   for (j = i; j < argc; j++)
     fprintf (log, "[run] argv[%d]:\t\t%s\n", j - i, argv[j]);
@@ -783,7 +793,10 @@ main (int argc, char **argv)
     }
   else
     {
-      unsigned hard_time_limit = (time_limit * 101 + 99) / 100;	// + 1%
+      unsigned hard_time_limit;
+      if (time_limit < real_time_limit) hard_time_limit = time_limit;
+      else hard_time_limit = real_time_limit;
+      hard_time_limit = (hard_time_limit * 101 + 99) / 100;	// + 1%
       l.rlim_cur = l.rlim_max = hard_time_limit;
       setrlimit (RLIMIT_CPU, &l);
       l.rlim_cur = l.rlim_max = hard_time_limit << 20;
@@ -814,7 +827,7 @@ main (int argc, char **argv)
   fprintf (log, "[run] end:\t\t%s", ctime (&t));
   fprintf (log, "[run] status:\t\t");
 
-  if (max_seconds >= time_limit)
+  if (max_seconds >= time_limit || max_seconds >= real_time_limit)
     goto FORCE_OUT_OF_TIME_ENTRY;
 
   switch (ok)

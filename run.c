@@ -805,13 +805,14 @@ main (int argc, char **argv)
   else
     {
       unsigned hard_time_limit;
-      if (time_limit < real_time_limit) hard_time_limit = time_limit;
-      else hard_time_limit = real_time_limit;
-      hard_time_limit = (hard_time_limit * 101 + 99) / 100;	// + 1%
-      l.rlim_cur = l.rlim_max = hard_time_limit;
-      setrlimit (RLIMIT_CPU, &l);
-      l.rlim_cur = l.rlim_max = hard_time_limit << 20;
-      setrlimit (RLIMIT_RSS, &l);
+      if (time_limit < real_time_limit) {
+	hard_time_limit = time_limit;
+	hard_time_limit = (hard_time_limit * 101 + 99) / 100;	// + 1%
+	l.rlim_cur = l.rlim_max = hard_time_limit;
+	setrlimit (RLIMIT_CPU, &l);
+	l.rlim_cur = l.rlim_max = hard_time_limit << 20;
+	setrlimit (RLIMIT_RSS, &l);
+      }
       execvp (argv[i], argv + i);
       kill (getppid (), SIGUSR1);
       exit (1);
@@ -831,7 +832,7 @@ main (int argc, char **argv)
   fprintf (log, "[run] end:\t\t%s", ctime (&t));
   fprintf (log, "[run] status:\t\t");
 
-  if (max_seconds >= time_limit || max_seconds >= real_time_limit)
+  if (max_seconds >= time_limit || real_time () >= real_time_limit)
     goto FORCE_OUT_OF_TIME_ENTRY;
 
   switch (ok)

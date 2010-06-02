@@ -71,19 +71,24 @@ typedef enum Status Status;
 "\n" \
 "  where option is from the following list:\n" \
 "\n" \
-"    -h                       print this command line summary\n" \
+"    -h                         print this command line summary\n" \
 "    --help\n" \
 "\n" \
-"    --version                print version number\n" \
+"    --version                  print version number\n" \
 "\n" \
-"    -o <file>                overwrite or create <file> for logging\n" \
+"    -o <file>                  overwrite or create <file> for logging\n" \
 "    --output-file=<file>\n" \
 "\n" \
-"    --space-limit=<number>   set space limit to <number> MB\n" \
+"    --space-limit=<number>     set space limit to <number> MB\n" \
+"    -s <number>\n"\
 "\n" \
-"    --time-limit=<number>    set time limit to <number> seconds\n" \
+"    --time-limit=<number>      set time limit to <number> seconds\n" \
+"    -t <number>\n"\
 "\n" \
-"    -k|--kill                propagate signals\n" \
+"    --real-time-limit=<number> set real time limit to <number> seconds\n" \
+"    -r <number>\n"\
+"\n" \
+"    -k|--kill                  propagate signals\n" \
 "\n" \
 "The program is the name of an executable followed by its arguments.\n"
 

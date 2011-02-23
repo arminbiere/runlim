@@ -22,7 +22,7 @@
 #define COMM_LEN 16
 
 /*------------------------------------------------------------------------*/
-#define PROC_BASE    "/proc"
+#define Proc_BASE    "/proc"
 /*------------------------------------------------------------------------*/
 
 enum Status
@@ -40,27 +40,27 @@ enum Status
 
 /*------------------------------------------------------------------------*/
 
-typedef struct _proc
+typedef struct Proc
 {
   pid_t pid, ppid;
   int highlight;
   long unsigned ujiffies, sjiffies;
   long unsigned vsize;
   long rsize;
-  struct _child *children;
-  struct _proc *parent;
-  struct _proc *next;
+  struct Child *children;
+  struct Proc *parent;
+  struct Proc *next;
 }
-PROC;
+Proc;
 
-typedef struct _child
+typedef struct Child
 {
-  PROC *child;
-  struct _child *next;
+  Proc *child;
+  struct Child *next;
 }
-CHILD;
+Child;
 
-static PROC *list = NULL;
+static Proc *proc_list = NULL;
 
 typedef enum Status Status;
 
@@ -265,13 +265,13 @@ static unsigned start_time, time_limit, real_time_limit, space_limit;
 
 /*------------------------------------------------------------------------*/
 
-static PROC *
+static Proc *
 new_proc (pid_t pid, pid_t ppid, long unsigned sjiffies, 
 	  long unsigned ujiffies, unsigned long vsize, long rsize)
 {
-  PROC *new;
+  Proc *new;
 
-  if (!(new = malloc (sizeof (PROC))))
+  if (!(new = malloc (sizeof (Proc))))
     {
       perror ("malloc");
       exit (1);
@@ -285,18 +285,18 @@ new_proc (pid_t pid, pid_t ppid, long unsigned sjiffies,
   new->highlight = 0;
   new->children = NULL;
   new->parent = NULL;
-  new->next = list;
-  return list = new;
+  new->next = proc_list;
+  return proc_list = new;
 }
 
 /*------------------------------------------------------------------------*/
 
 static void
-add_child (PROC * parent, PROC * child)
+add_child (Proc * parent, Proc * child)
 {
-  CHILD *new, **walk;
+  Child *new, **walk;
 
-  if (!(new = malloc (sizeof (CHILD))))
+  if (!(new = malloc (sizeof (Child))))
     {
       perror ("malloc");
       exit (1);
@@ -312,15 +312,37 @@ add_child (PROC * parent, PROC * child)
 
 /*------------------------------------------------------------------------*/
 
-static PROC *
+static Proc *
 find_proc (pid_t pid)
 {
-  PROC *walk;
+  Proc *p;
 
-  for (walk = list; walk; walk = walk->next)
-    if (walk->pid == pid)
+  for (p = proc_list; p; p = p->next)
+    if (p->pid == pid)
       break;
-  return walk;
+
+  return p;
+}
+
+/*------------------------------------------------------------------------*/
+
+static void
+delete_proc (void) 
+{
+  Child * c, * nextc;
+  Proc * p, * nextp;
+
+  for (p = proc_list; p; p = nextp)
+    {
+      nextp = p->next;
+      for (c = p->children; c; c = nextc) 
+	{
+	  nextc = c->next;
+          free (c);
+	}
+      free (p);
+    }
+  proc_list = 0;
 }
 
 /*------------------------------------------------------------------------*/
@@ -329,7 +351,7 @@ static void
 add_proc (pid_t pid, pid_t ppid, long unsigned sjiffies, 
 	  long unsigned ujiffies, unsigned long vsize, long rsize)
 {
-  PROC *this, *parent;
+  Proc *this, *parent;
 
   if (!(this = find_proc (pid)))
     this = new_proc (pid, ppid, sjiffies, ujiffies, vsize, rsize);
@@ -359,8 +381,7 @@ add_proc (pid_t pid, pid_t ppid, long unsigned sjiffies,
 }
 
 /*------------------------------------------------------------------------*/
-/*
- * read_proc now uses a similar method as procps for finding the process
+/* read_proc now uses a similar method as procps for finding the process
  * name in the /proc filesystem. My thanks to Albert and procps authors.
  */
 static void
@@ -378,9 +399,9 @@ read_proc ()
 
   buffer = malloc (size = 100);
 
-  if (!(dir = opendir (PROC_BASE)))
+  if (!(dir = opendir (Proc_BASE)))
     {
-      perror (PROC_BASE);
+      perror (Proc_BASE);
       exit (1);
     }
 
@@ -390,9 +411,9 @@ SKIP:
     {
       empty = 0;
       if ((pid = (pid_t) atoi (de->d_name)) == 0) continue;
-      if (!(path = malloc (strlen (PROC_BASE) + strlen (de->d_name) + 10)))
+      if (!(path = malloc (strlen (Proc_BASE) + strlen (de->d_name) + 10)))
 	continue;
-      sprintf (path, "%s/%d/stat", PROC_BASE, pid);
+      sprintf (path, "%s/%d/stat", Proc_BASE, pid);
       file = fopen (path, "r");
       free (path);
       if (!file) continue;
@@ -450,14 +471,14 @@ SKIP:
 	  token = strtok (0, " ");
 	}
       if (ujiffies < 0 || sjiffies < 0) goto SKIP;
-      add_proc(pid, ppid, ujiffies, sjiffies, vsize, rsize);
+      add_proc (pid, ppid, ujiffies, sjiffies, vsize, rsize);
     }
   
   (void) closedir (dir);
   free (buffer);
   if (empty)
     {
-      fprintf (stderr, "%s is empty (not mounted ?)\n", PROC_BASE) ;
+      fprintf (stderr, "%s is empty (not mounted ?)\n", Proc_BASE) ;
       exit (1);
     }
 }
@@ -465,7 +486,7 @@ SKIP:
 /*------------------------------------------------------------------------*/
 
 static void
-sample_children (CHILD *cptr, double *time_ptr, double *mb_ptr)
+sample_children (Child *cptr, double *time_ptr, double *mb_ptr)
 {
   while (cptr)
     {
@@ -473,32 +494,31 @@ sample_children (CHILD *cptr, double *time_ptr, double *mb_ptr)
 #ifdef DEBUG
       fprintf(log, "ujiffies %lu\n", cptr->child->ujiffies); 
       fprintf(log, "sjiffies %lu\n", cptr->child->sjiffies); 
-      fprintf(log, "result %f\n", (cptr->child->ujiffies + cptr->child->sjiffies) / (double)HZ);
+      fprintf(log, "result %f\n",
+              (cptr->child->ujiffies + cptr->child->sjiffies) / (double)HZ);
       fprintf(log, "timeptr %f\n", *time_ptr);
-      fprintf(log, "pid: %d vsize %lu\n", cptr->child->pid, cptr->child->vsize);
+      fprintf(log, "pid: %d vsize %lu\n",
+              cptr->child->pid, cptr->child->vsize);
 #endif
 
-      *time_ptr += (cptr->child->ujiffies + cptr->child->sjiffies) / (double) HZ;
-#if 0
-      *mb_ptr += cptr->child->vsize / (double) (1 << 20);
-#else
+      *time_ptr +=
+        (cptr->child->ujiffies + cptr->child->sjiffies) / (double) HZ;
+
       *mb_ptr += cptr->child->rsize / (double) (1 << 8);
-#endif
 
 #ifdef DEBUG
       fprintf(log, "timeptr(new) %f\n", *time_ptr);
 #endif
 
       if (cptr->child->children)
-	sample_children(cptr->child->children, time_ptr, mb_ptr);
+	sample_children (cptr->child->children, time_ptr, mb_ptr);
       cptr = cptr->next;
     }
   return;
 }
 
 /*------------------------------------------------------------------------*/
-/* 
- * should trace the memory and jiffies consumption recursively
+/* should trace the memory and jiffies consumption recursively
  * 1. calls read_proc
  * 2. calls find_proc with pid
  * 3. goes through all the children
@@ -506,22 +526,21 @@ sample_children (CHILD *cptr, double *time_ptr, double *mb_ptr)
 static int
 sample_recursive (double *time_ptr, double *mb_ptr)
 {
-  PROC *pr;
-  read_proc();
-  pr = find_proc(child_pid);
+  Proc *pr;
+
+  read_proc ();
+  pr = find_proc (child_pid);
 
   if (!pr)
     return 0;
 
   *time_ptr = (pr->ujiffies + pr->sjiffies) / (double) HZ;
-#if 0
-  *mb_ptr = pr->vsize / (double) (1 << 20);
-#else
   *mb_ptr = pr->rsize / (double) (1 << 8);
-#endif
 
   if (pr->children)
-    sample_children(pr->children, time_ptr, mb_ptr);
+    sample_children (pr->children, time_ptr, mb_ptr);
+
+  delete_proc ();
 
   return 1;
 }

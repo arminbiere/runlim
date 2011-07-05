@@ -9,9 +9,7 @@ do
   esac
   shift
 done
-version=`cat VERSION`
-echo "[configure] debug $debug"
-echo "[configure] version $version"
+echo "[configure] version `cat VERSION`"
 [ x"$CC" = x ] && CC=gcc
 if [ x"$CFLAGS" = x ]
 then
@@ -39,7 +37,6 @@ fi
 echo "[configure] $CC $CFLAGS"
 rm -f makefile
 sed \
--e "s,@VERSION@,\"$version\"," \
 -e "s,@CC@,$CC," \
 -e "s,@CFLAGS@,$CFLAGS," \
 makefile.in > makefile

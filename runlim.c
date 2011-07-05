@@ -842,7 +842,6 @@ main (int argc, char **argv)
       exit (1);
     }
 
-
   real = real_time ();
 
   if (caught_usr1_signal)

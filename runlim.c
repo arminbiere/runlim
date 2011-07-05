@@ -491,7 +491,7 @@ sample_children (Child *cptr, double *time_ptr, double *mb_ptr)
   while (cptr)
     {
       children++;
-#ifdef DEBUG
+#ifdef DEBUGSAMPLE
       fprintf(log, "ujiffies %lu\n", cptr->child->ujiffies); 
       fprintf(log, "sjiffies %lu\n", cptr->child->sjiffies); 
       fprintf(log, "result %f\n",
@@ -506,7 +506,7 @@ sample_children (Child *cptr, double *time_ptr, double *mb_ptr)
 
       *mb_ptr += cptr->child->rsize / (double) (1 << 8);
 
-#ifdef DEBUG
+#ifdef DEBUGSAMPLE
       fprintf(log, "timeptr(new) %f\n", *time_ptr);
 #endif
 
@@ -757,13 +757,14 @@ main (int argc, char **argv)
   if (!log)
     log = stderr;
 
-  fprintf (log, "[runlim] time limit:\t%u seconds\n", time_limit);
+  fprintf (log, "[runlim] version:\t\t%s\n", VERSION);
+  fprintf (log, "[runlim] time limit:\t\t%u seconds\n", time_limit);
   fprintf (log, "[runlim] real time limit:\t%u seconds\n", real_time_limit);
-  fprintf (log, "[runlim] space limit:\t%u MB\n", space_limit);
+  fprintf (log, "[runlim] space limit:\t\t%u MB\n", space_limit);
   for (j = i; j < argc; j++)
     fprintf (log, "[runlim] argv[%d]:\t\t%s\n", j - i, argv[j]);
   t = time (0);
-  fprintf (log, "[runlim] start:\t\t%s", ctime (&t));
+  fprintf (log, "[runlim] start:\t\t\t%s", ctime (&t));
   fflush (log);
 
   signal (SIGUSR1, sig_usr1_handler);
@@ -780,7 +781,7 @@ main (int argc, char **argv)
       else
 	{
 	  status = 0;
-	  fprintf (log, "[runlim] main pid:\t%d\n", (int) child_pid);
+	  fprintf (log, "[runlim] main pid:\t\t%d\n", (int) child_pid);
 	  fflush (log);
 
 	  assert (SAMPLE_RATE < 1000000);
@@ -853,7 +854,7 @@ main (int argc, char **argv)
     ok = OUT_OF_TIME;
 
   t = time (0);
-  fprintf (log, "[runlim] end:\t\t%s", ctime (&t));
+  fprintf (log, "[runlim] end:\t\t\t%s", ctime (&t));
   fprintf (log, "[runlim] status:\t\t");
 
   if (max_seconds >= time_limit || real_time () >= real_time_limit)
@@ -897,9 +898,9 @@ FORCE_OUT_OF_TIME_ENTRY:
   fflush (log);
 
   fprintf (log, "[runlim] children:\t\t%d\n", children);
-  fprintf (log, "[runlim] real:\t\t%.2f seconds\n", real);
-  fprintf (log, "[runlim] time:\t\t%.2f seconds\n", max_seconds);
-  fprintf (log, "[runlim] space:\t\t%.1f MB\n", max_mb);
+  fprintf (log, "[runlim] real:\t\t\t%.2f seconds\n", real);
+  fprintf (log, "[runlim] time:\t\t\t%.2f seconds\n", max_seconds);
+  fprintf (log, "[runlim] space:\t\t\t%.1f MB\n", max_mb);
   fprintf (log, "[runlim] samples:\t\t%u\n", num_samples);
 
   fflush (log);

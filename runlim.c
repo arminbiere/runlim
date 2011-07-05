@@ -491,6 +491,7 @@ sample_children (Child *cptr, double *time_ptr, double *mb_ptr)
   while (cptr)
     {
       children++;
+
 #ifdef DEBUGSAMPLE
       fprintf(log, "ujiffies %lu\n", cptr->child->ujiffies); 
       fprintf(log, "sjiffies %lu\n", cptr->child->sjiffies); 
@@ -500,18 +501,16 @@ sample_children (Child *cptr, double *time_ptr, double *mb_ptr)
       fprintf(log, "pid: %d vsize %lu\n",
               cptr->child->pid, cptr->child->vsize);
 #endif
-
       *time_ptr +=
         (cptr->child->ujiffies + cptr->child->sjiffies) / (double) HZ;
 
       *mb_ptr += cptr->child->rsize / (double) (1 << 8);
-
 #ifdef DEBUGSAMPLE
       fprintf(log, "timeptr(new) %f\n", *time_ptr);
 #endif
-
       if (cptr->child->children)
 	sample_children (cptr->child->children, time_ptr, mb_ptr);
+
       cptr = cptr->next;
     }
   return;

@@ -1,18 +1,46 @@
 #!/bin/sh
-
-#--------------------------------------------------------------------------#
-
-fmt="%-20s ..."
-
-#--------------------------------------------------------------------------#
-
-printf "$fmt" "version"
+debug=no
+while [ $# -gt 0 ]
+do
+  case $1 in
+    -h|--help) echo "usage: configure [-h|--help|-g]"; exit 0;;
+    -g) debug=yes;;
+    *) echo "*** configure: invalid option '$1' (try -h)"; exit 1;;
+  esac
+  shift
+done
 version=`cat VERSION`
-echo " $version"
-
-#--------------------------------------------------------------------------#
-
-printf "$fmt" "generating Makefile"
-rm -f Makefile
-sed -e "s,@VERSION@,\"$version\",g" Makefile.in > Makefile
-echo " done"
+echo "[configure] debug $debug"
+echo "[configure] version $version"
+[ x"$CC" = x ] && CC=gcc
+if [ x"$CFLAGS" = x ]
+then
+  case x"$CC" in
+    xgcc)
+      CFLAGS="-Wall"
+      if [ $debug = yes ]
+      then
+	CFLAGS="$CFLAGS -g"
+      else
+	CFLAGS="$CFLAGS -O3 -DNDEBUG"
+      fi
+      ;;
+    *)
+      CFLAGS="-W"
+      if [ $debug = yes ]
+      then
+	CFLAGS="$CFLAGS -g"
+      else
+	CFLAGS="$CFLAGS -O -DNDEBUG"
+      fi
+      ;;
+  esac
+fi
+echo "[configure] $CC $CFLAGS"
+rm -f makefile
+sed \
+-e "s,@VERSION@,\"$version\"," \
+-e "s,@CC@,$CC," \
+-e "s,@CFLAGS@,$CFLAGS," \
+makefile.in > makefile
+echo "[configure] generated makefile"

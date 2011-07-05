@@ -1,0 +1,5 @@
+runlim: runlim.c makefile VERSION
+	@CC@ @CFLAGS@ -DVERSION=\"`cat VERSION`\" -o runlim runlim.c
+clean:
+	rm -f runlim
+.PHONY: clean

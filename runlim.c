@@ -67,7 +67,7 @@ typedef enum Status Status;
 /*------------------------------------------------------------------------*/
 
 #define USAGE \
-"usage: run [option ...] program [arg ...]\n" \
+"usage: runlim [option ...] program [arg ...]\n" \
 "\n" \
 "  where option is from the following list:\n" \
 "\n" \
@@ -143,7 +143,7 @@ parse_number_argument (int *i, int argc, char **argv)
     ARGUMENT_IS_MISSING:
 
       fprintf (stderr,
-	       "*** run: number argument for '-%c' is missing\n",
+	       "*** runlim: number argument for '-%c' is missing\n",
 	       argv[*i][1]);
       exit (1);
 
@@ -177,7 +177,7 @@ parse_number_rhs (char *str)
 
   if (!p[1])
     {
-      fputs ("*** run: argument to ", stderr);
+      fputs ("*** runlim: argument to ", stderr);
       print_long_command_line_option (stderr, str);
       fputs (" is missing\n", stderr);
       exit (1);
@@ -187,7 +187,7 @@ parse_number_rhs (char *str)
 
   if (!isposnumber (p + 1))
     {
-      fputs ("*** run: argument to ", stderr);
+      fputs ("*** runlim: argument to ", stderr);
       print_long_command_line_option (stderr, str);
       fputs (" is not a positive number\n", stderr);
       exit (1);
@@ -209,14 +209,14 @@ open_log (const char *name, const char *option)
 
   if (!name || !name[0])
     {
-      fprintf (stderr, "*** run: argument to '%s' is missing\n", option);
+      fprintf (stderr, "*** runlim: argument to '%s' is missing\n", option);
       exit (1);
     }
 
   res = fopen (name, "w");
   if (!res)
     {
-      fprintf (stderr, "*** run: could not write to '%s'\n", name);
+      fprintf (stderr, "*** runlim: could not write to '%s'\n", name);
       exit (1);
     }
 
@@ -550,7 +550,7 @@ sample_recursive (double *time_ptr, double *mb_ptr)
 static void
 report (double time, double mb)
 {
-  fprintf (log, "[run] sample:\t\t%.1f seconds, %.1f MB\n", time, mb);
+  fprintf (log, "[runlim] sample:\t\t%.1f seconds, %.1f MB\n", time, mb);
   fflush (log);
 }
 
@@ -673,7 +673,7 @@ main (int argc, char **argv)
   double real;
   time_t t;
 
-  ok = OK;				/* status of the run */
+  ok = OK;				/* status of the runlim */
   s = 0;				/* signal caught */
   time_limit = 60 * 60 * 24 * 3600;	/* one year */
   real_time_limit = time_limit;
@@ -739,7 +739,7 @@ main (int argc, char **argv)
 	    }
 	  else
 	    {
-	      fprintf (stderr, "*** run: invalid option '%s' (try '-h')\n",
+	      fprintf (stderr, "*** runlim: invalid option '%s' (try '-h')\n",
 		       argv[i]);
 	      exit (1);
 	    }
@@ -750,20 +750,20 @@ main (int argc, char **argv)
 
   if (i >= argc)
     {
-      fprintf (stderr, "*** run: no program specified (try '-h')\n");
+      fprintf (stderr, "*** runlim: no program specified (try '-h')\n");
       exit (1);
     }
 
   if (!log)
     log = stderr;
 
-  fprintf (log, "[run] time limit:\t%u seconds\n", time_limit);
-  fprintf (log, "[run] real time limit:\t%u seconds\n", real_time_limit);
-  fprintf (log, "[run] space limit:\t%u MB\n", space_limit);
+  fprintf (log, "[runlim] time limit:\t%u seconds\n", time_limit);
+  fprintf (log, "[runlim] real time limit:\t%u seconds\n", real_time_limit);
+  fprintf (log, "[runlim] space limit:\t%u MB\n", space_limit);
   for (j = i; j < argc; j++)
-    fprintf (log, "[run] argv[%d]:\t\t%s\n", j - i, argv[j]);
+    fprintf (log, "[runlim] argv[%d]:\t\t%s\n", j - i, argv[j]);
   t = time (0);
-  fprintf (log, "[run] start:\t\t%s", ctime (&t));
+  fprintf (log, "[runlim] start:\t\t%s", ctime (&t));
   fflush (log);
 
   signal (SIGUSR1, sig_usr1_handler);
@@ -780,7 +780,7 @@ main (int argc, char **argv)
       else
 	{
 	  status = 0;
-	  fprintf (log, "[run] main pid:\t%d\n", (int) child_pid);
+	  fprintf (log, "[runlim] main pid:\t%d\n", (int) child_pid);
 	  fflush (log);
 
 	  assert (SAMPLE_RATE < 1000000);
@@ -853,8 +853,8 @@ main (int argc, char **argv)
     ok = OUT_OF_TIME;
 
   t = time (0);
-  fprintf (log, "[run] end:\t\t%s", ctime (&t));
-  fprintf (log, "[run] status:\t\t");
+  fprintf (log, "[runlim] end:\t\t%s", ctime (&t));
+  fprintf (log, "[runlim] status:\t\t");
 
   if (max_seconds >= time_limit || real_time () >= real_time_limit)
     goto FORCE_OUT_OF_TIME_ENTRY;
@@ -893,14 +893,14 @@ FORCE_OUT_OF_TIME_ENTRY:
       break;
     }
   fputc ('\n', log);
-  fprintf (log, "[run] result:\t\t%d\n", res);
+  fprintf (log, "[runlim] result:\t\t%d\n", res);
   fflush (log);
 
-  fprintf (log, "[run] children:\t\t%d\n", children);
-  fprintf (log, "[run] real:\t\t%.2f seconds\n", real);
-  fprintf (log, "[run] time:\t\t%.2f seconds\n", max_seconds);
-  fprintf (log, "[run] space:\t\t%.1f MB\n", max_mb);
-  fprintf (log, "[run] samples:\t\t%u\n", num_samples);
+  fprintf (log, "[runlim] children:\t\t%d\n", children);
+  fprintf (log, "[runlim] real:\t\t%.2f seconds\n", real);
+  fprintf (log, "[runlim] time:\t\t%.2f seconds\n", max_seconds);
+  fprintf (log, "[runlim] space:\t\t%.1f MB\n", max_mb);
+  fprintf (log, "[runlim] samples:\t\t%u\n", num_samples);
 
   fflush (log);
 

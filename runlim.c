@@ -381,21 +381,21 @@ add_proc (pid_t pid, pid_t ppid, long unsigned sjiffies,
 }
 
 /*------------------------------------------------------------------------*/
-/* read_proc now uses a similar method as procps for finding the process
- * name in the /proc filesystem. My thanks to Albert and procps authors.
+/* Uses a similar method as 'procps' for finding the process name in the
+ * /proc filesystem. My thanks to Albert and procps authors.
  */
 static void
 read_proc ()
 {
-  DIR *dir;
-  struct dirent *de;
-  FILE *file;
-  char *path, *buffer, *token;
-  pid_t pid, ppid;
-  int i, ch, tmp, size, pos, num_valid_results, empty;
+  int i, ch, tmp, size, pos, empty;
   long unsigned ujiffies, sjiffies;
+  char *path, *buffer, *token;
   unsigned long vsize;
+  struct dirent *de;
+  pid_t pid, ppid;
+  FILE *file;
   long rsize;
+  DIR *dir;
 
   buffer = malloc (size = 100);
 
@@ -417,7 +417,6 @@ SKIP:
       file = fopen (path, "r");
       free (path);
       if (!file) continue;
-      num_valid_results = 0;
       pos = 0;
       
       while ((ch = getc (file)) != EOF)
@@ -431,7 +430,6 @@ SKIP:
       fclose (file);
       
       ujiffies = sjiffies = -1;
-      num_valid_results = 0;
       vsize = 0;
       rsize = 0;
       
@@ -546,15 +544,6 @@ sample_recursive (double *time_ptr, double *mb_ptr)
 
 /*------------------------------------------------------------------------*/
 
-static void
-report (double time, double mb)
-{
-  fprintf (log, "[runlim] sample:\t\t%.1f seconds, %.1f MB\n", time, mb);
-  fflush (log);
-}
-
-/*------------------------------------------------------------------------*/
-
 struct itimerval timer, old_timer;
 static int caught_out_of_memory;
 static int caught_out_of_time;
@@ -602,6 +591,18 @@ real_time (void)
   if (start_time < 0) return -1;
   res = wall_clock_time() - start_time;
   return res;
+}
+
+/*------------------------------------------------------------------------*/
+
+static void
+report (double time, double mb)
+{
+  double real = real_time ();
+  fprintf (log, 
+     "[runlim] sample:\t\t%.1f time, %.1f real, %.1f MB\n", 
+     time, real, mb);
+  fflush (log);
 }
 
 /*------------------------------------------------------------------------*/

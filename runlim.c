@@ -553,17 +553,17 @@ static int caught_out_of_time;
 static void
 really_kill_child (void)
 {
-  usleep (10);
-  kill (child_pid, SIGTERM);
-  usleep (10);
-  kill (child_pid, SIGTERM);
-  usleep (10);
+  usleep (1000);
   kill (child_pid, SIGTERM);
   usleep (100);
+  kill (child_pid, SIGTERM);
+  usleep (100);
+  kill (child_pid, SIGTERM);
+  usleep (1000);
   kill (child_pid, SIGKILL);
-  usleep (10);
+  usleep (100);
   kill (child_pid, SIGKILL);
-  usleep (10);
+  usleep (100);
   kill (child_pid, SIGKILL);
 }
 

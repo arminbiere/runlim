@@ -555,15 +555,15 @@ really_kill_child (void)
 {
   usleep (1000);
   kill (child_pid, SIGTERM);
-  usleep (100);
+  usleep (1000);
   kill (child_pid, SIGTERM);
-  usleep (100);
+  usleep (1000);
   kill (child_pid, SIGTERM);
   usleep (1000);
   kill (child_pid, SIGKILL);
-  usleep (100);
+  usleep (1000);
   kill (child_pid, SIGKILL);
-  usleep (100);
+  usleep (1000);
   kill (child_pid, SIGKILL);
 }
 

@@ -863,33 +863,40 @@ main (int argc, char **argv)
     {
     case OK:
       fputs ("ok", log);
+      res = 0;
       break;
     case OUT_OF_TIME:
 FORCE_OUT_OF_TIME_ENTRY:
       fputs ("out of time", log);
-      res = 1;
+      res = 2;
       break;
     case OUT_OF_MEMORY:
       fputs ("out of memory", log);
-      res = 1;
+      res = 3;
       break;
     case SEGMENTATION_FAULT:
       fputs ("segmentation fault", log);
+      res = 4;
       break;
     case BUS_ERROR:
       fputs ("bus error", log);
+      res = 5;
       break;
     case FORK_FAILED:
       fputs ("fork failed", log);
+      res = 6;
       break;
     case INTERNAL_ERROR:
       fputs ("internal error", log);
+      res = 7;
       break;
     case EXEC_FAILED:
       fputs ("execvp failed", log);
+      res = 1;
       break;
     default:
       fprintf (log, "signal(%d)", s);
+      res = 11;
       break;
     }
   fputc ('\n', log);

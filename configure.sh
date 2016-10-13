@@ -3,13 +3,13 @@ debug=no
 while [ $# -gt 0 ]
 do
   case $1 in
-    -h|--help) echo "usage: configure [-h|--help|-g]"; exit 0;;
+    -h|--help) echo "usage: configure.sh [-h|--help|-g]"; exit 0;;
     -g) debug=yes;;
-    *) echo "*** configure: invalid option '$1' (try -h)"; exit 1;;
+    *) echo "*** configure.sh: invalid option '$1' (try -h)"; exit 1;;
   esac
   shift
 done
-echo "[configure] version `cat VERSION`"
+echo "[configure.sh] version `cat VERSION`"
 [ x"$CC" = x ] && CC=gcc
 if [ x"$CFLAGS" = x ]
 then
@@ -34,10 +34,10 @@ then
       ;;
   esac
 fi
-echo "[configure] $CC $CFLAGS"
+echo "[configure.sh] $CC $CFLAGS"
 rm -f makefile
 sed \
 -e "s,@CC@,$CC," \
 -e "s,@CFLAGS@,$CFLAGS," \
 makefile.in > makefile
-echo "[configure] generated makefile"
+echo "[configure.sh] generated makefile"

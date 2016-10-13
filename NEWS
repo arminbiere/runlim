@@ -1,0 +1,5 @@
+News for Version 1.10
+---------------------
+
+- using RLIMIT_AS and fixed space limit copy & paste bug
+  (thanks to Hakan Hjort)

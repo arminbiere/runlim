@@ -4,7 +4,7 @@ for s in log/*.c
 do
   base=`basename $s .c`
   gcc -o log/${base}.exe log/$base.c
-  ./run \
+  ./runlim \
     -o log/$base.log \
     -s 5 \
     -t 5\

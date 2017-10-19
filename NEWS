@@ -1,7 +1,7 @@
 News for Version 1.11
 ---------------------
 
-- fixed very old bug in 'strtok' on non-initialized (zero terminated) buffer
+- fixed very old issue in 'strtok' with non-initialized (non-zero terminated) buffer
   (thanks to Sam Bayless)
 
 

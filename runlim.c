@@ -428,6 +428,11 @@ SKIP:
 	}
       
       fclose (file);
+
+      if (pos >= size - 1)
+	buffer = realloc (buffer, size *= 2);
+      
+      buffer[pos++] = 0;;
       
       ujiffies = sjiffies = -1;
       vsize = 0;

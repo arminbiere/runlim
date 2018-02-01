@@ -674,9 +674,9 @@ static void print_host_name () {
   if (file) {
     int ch;
     while ((ch = getc (file)) != '\n' && ch != EOF)
-      fputc (ch, stdout);
+      fputc (ch, log);
     fclose (file);
-  } else printf ("unknown");
+  } else fputs ("unknown", log);
 }
 
 /*------------------------------------------------------------------------*/
@@ -777,7 +777,7 @@ main (int argc, char **argv)
   fprintf (log, "[runlim] version:\t\t%s\n", VERSION);
   fprintf (log, "[runlim] host:\t\t\t");
   print_host_name ();
-  printf ("\n");
+  fputc ('\n', log);
   fprintf (log, "[runlim] time limit:\t\t%u seconds\n", time_limit);
   fprintf (log, "[runlim] real time limit:\t%u seconds\n", real_time_limit);
   fprintf (log, "[runlim] space limit:\t\t%u MB\n", space_limit);

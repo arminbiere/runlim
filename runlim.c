@@ -855,9 +855,15 @@ main (int argc, char **argv)
 	hard_time_limit = (hard_time_limit * 101 + 99) / 100;	// + 1%
 	l.rlim_cur = l.rlim_max = hard_time_limit;
 	setrlimit (RLIMIT_CPU, &l);
-	l.rlim_cur = l.rlim_max = space_limit;
-	setrlimit (RLIMIT_AS, &l);
       }
+#if 0
+      // After fixing this we figured that this would produce
+      // segfaults intead of memouts.  Thus uncommented and we
+      // have to rely on sampling instead.
+      //
+      l.rlim_cur = l.rlim_max = (rlim_t) space_limit * 1024 * 1024;
+      setrlimit (RLIMIT_AS, &l);
+#endif
       execvp (argv[i], argv + i);
       kill (getppid (), SIGUSR1);
       exit (1);

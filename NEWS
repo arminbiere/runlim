@@ -1,8 +1,16 @@
+News for Version 1.12
+---------------------
+
+- added '[runlim] host: ...' output
+
+- remove limiting memory through 'setrlimit (RLIMIT_AS, ...'
+  (thanks to Mathias Preiner)
+
 News for Version 1.11
 ---------------------
 
-- fixed very old issue in 'strtok' with non-initialized (non-zero terminated) buffer
-  (thanks to Sam Bayless)
+- fixed very old issue in 'strtok' with non-initialized
+  (non-zero terminated) buffer (thanks to Sam Bayless)
 
 
 News for Version 1.10

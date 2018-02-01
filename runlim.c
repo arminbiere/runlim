@@ -669,6 +669,18 @@ sig_usr1_handler (int s)
 
 /*------------------------------------------------------------------------*/
 
+static void print_host_name () {
+  FILE * file = fopen ("/proc/sys/kernel/hostname", "r");
+  if (file) {
+    int ch;
+    while ((ch = getc (file)) != '\n' && ch != EOF)
+      fputc (ch, stdout);
+    fclose (file);
+  } else printf ("unknown");
+}
+
+/*------------------------------------------------------------------------*/
+
 int
 main (int argc, char **argv)
 {
@@ -763,6 +775,9 @@ main (int argc, char **argv)
     log = stderr;
 
   fprintf (log, "[runlim] version:\t\t%s\n", VERSION);
+  fprintf (log, "[runlim] host:\t\t\t");
+  print_host_name ();
+  printf ("\n");
   fprintf (log, "[runlim] time limit:\t\t%u seconds\n", time_limit);
   fprintf (log, "[runlim] real time limit:\t%u seconds\n", real_time_limit);
   fprintf (log, "[runlim] space limit:\t\t%u MB\n", space_limit);

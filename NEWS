@@ -1,6 +1,9 @@
 News for Version 1.12
 ---------------------
 
+- closing 'log' if necessary
+  (thanks to Viktor Schuppan)
+
 - added '[runlim] host: ...' output
 
 - remove limiting memory through 'setrlimit (RLIMIT_AS, ...'

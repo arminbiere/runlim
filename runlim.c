@@ -241,6 +241,7 @@ get_physical_mb ()
 /*------------------------------------------------------------------------*/
 
 static FILE *log = 0;
+static int close_log = 0;
 static int child_pid = -1;
 static int parent_pid = -1;
 static int num_samples_since_last_report = 0;
@@ -432,7 +433,7 @@ SKIP:
       if (pos >= size - 1)
 	buffer = realloc (buffer, size *= 2);
       
-      buffer[pos++] = 0;;
+      buffer[pos++] = 0;
       
       ujiffies = sjiffies = -1;
       vsize = 0;
@@ -747,6 +748,8 @@ main (int argc, char **argv)
 		log = open_log (argv[i] + 2, "-o");
 	      else
 		log = open_log (i + 1 >= argc ? 0 : argv[++i], "-o");
+
+	      close_log = 1;
 	    }
 	  else if (strstr (argv[i], "--output-file=") == argv[i])
 	    {
@@ -858,7 +861,7 @@ main (int argc, char **argv)
       }
 #if 0
       // After fixing this we figured that this would produce
-      // segfaults intead of memouts.  Thus uncommented and we
+      // segfaults instead of memouts.  Thus uncommented and we
       // have to rely on sampling instead.
       //
       l.rlim_cur = l.rlim_max = (rlim_t) space_limit * 1024 * 1024;
@@ -936,6 +939,8 @@ FORCE_OUT_OF_TIME_ENTRY:
   fprintf (log, "[runlim] samples:\t\t%u\n", num_samples);
 
   fflush (log);
+  if (close_log)
+    fclose (log);
 
   if (propagate_signals)
     {

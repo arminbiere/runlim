@@ -1,5 +1,9 @@
-News for Version 1.12
+News for Version 1.13
 ---------------------
+
+- kill all child processes
+
+- new more uniform sampling code
 
 - closing 'log' if necessary
   (thanks to Viktor Schuppan)

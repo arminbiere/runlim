@@ -1,28 +1,32 @@
+#include <asm/param.h>
 #include <assert.h>
 #include <ctype.h>
-#include <time.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <sys/resource.h>
-#include <sys/time.h>
-#include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
-#include <asm/param.h>
-#include <dirent.h>
-#include <fcntl.h>
 
 /*------------------------------------------------------------------------*/
 
-#define SAMPLE_RATE 100000	/* in milliseconds */
+#define SAMPLE_RATE 10000	/* in milliseconds */
 #define REPORT_RATE 100		/* in terms of sampling */
 #define COMM_LEN 16
 
 /*------------------------------------------------------------------------*/
-#define Proc_BASE    "/proc"
+
+typedef struct Process Process;
+typedef enum Status Status;
+
 /*------------------------------------------------------------------------*/
 
 enum Status
@@ -40,29 +44,16 @@ enum Status
 
 /*------------------------------------------------------------------------*/
 
-typedef struct Proc
+struct Process
 {
-  pid_t pid, ppid;
-  int highlight;
-  long unsigned ujiffies, sjiffies;
-  long unsigned vsize;
-  long rsize;
-  struct Child *children;
-  struct Proc *parent;
-  struct Proc *next;
-}
-Proc;
-
-typedef struct Child
-{
-  Proc *child;
-  struct Child *next;
-}
-Child;
-
-static Proc *proc_list = NULL;
-
-typedef enum Status Status;
+  pid_t pid;
+  pid_t ppid;
+  pid_t pgid;
+  double time;
+  double mb;
+  long samples;
+  Process * next;
+};
 
 /*------------------------------------------------------------------------*/
 
@@ -140,7 +131,8 @@ parse_number_argument (int *i, int argc, char **argv)
     }
   else
     {
-    ARGUMENT_IS_MISSING:
+
+ARGUMENT_IS_MISSING:
 
       fprintf (stderr,
 	       "*** runlim: number argument for '-%c' is missing\n",
@@ -240,14 +232,19 @@ get_physical_mb ()
 
 /*------------------------------------------------------------------------*/
 
-static FILE *log = 0;
-static int close_log = 0;
 static int child_pid = -1;
 static int parent_pid = -1;
-static int num_samples_since_last_report = 0;
-static unsigned num_samples = 0;
+static int group_pid = -1;
+
+static FILE *log = 0;
+static int close_log = 0;
+
+static long num_samples_since_last_report = 0;
+static long num_samples = 0;
+
 static double max_mb = 0;
 static double max_seconds = 0;
+
 static int propagate_signals = 0;
 static int children = 0;
 
@@ -255,189 +252,110 @@ static int children = 0;
 
 #define PID_POS 0
 #define PPID_POS 3
+#define PGID_POS 4
 #define STIME_POS 13
 #define UTIME_POS 14
-#define VSIZE_POS 22
 #define RSIZE_POS 23
 
 /*------------------------------------------------------------------------*/
 
-static unsigned start_time, time_limit, real_time_limit, space_limit;
+static unsigned start_time;
+static unsigned time_limit;
+static unsigned real_time_limit;
+static unsigned space_limit;
 
 /*------------------------------------------------------------------------*/
 
-static Proc *
-new_proc (pid_t pid, pid_t ppid, long unsigned sjiffies, 
-	  long unsigned ujiffies, unsigned long vsize, long rsize)
-{
-  Proc *new;
+#define PROC_PATH    "/proc"
 
-  if (!(new = malloc (sizeof (Proc))))
-    {
-      perror ("malloc");
-      exit (1);
-    }
-  new->pid = pid;
-  new->ppid = ppid;
-  new->sjiffies = sjiffies;
-  new->ujiffies = ujiffies;
-  new->vsize = vsize;
-  new->rsize = rsize;
-  new->highlight = 0;
-  new->children = NULL;
-  new->parent = NULL;
-  new->next = proc_list;
-  return proc_list = new;
-}
+static char * buffer;
+static size_t size_buffer;
+static size_t pos_buffer;
+
+static char * path;
+static size_t size_path;
 
 /*------------------------------------------------------------------------*/
 
 static void
-add_child (Proc * parent, Proc * child)
+push_buffer (int ch)
 {
-  Child *new, **walk;
-
-  if (!(new = malloc (sizeof (Child))))
+  if (size_buffer == pos_buffer)
     {
-      perror ("malloc");
-      exit (1);
-    }
-  new->child = child;
-  for (walk = &parent->children; *walk; walk = &(*walk)->next)
-    if ((*walk)->child->pid > child->pid)
-      break;
-
-  new->next = *walk;
-  *walk = new;
-}
-
-/*------------------------------------------------------------------------*/
-
-static Proc *
-find_proc (pid_t pid)
-{
-  Proc *p;
-
-  for (p = proc_list; p; p = p->next)
-    if (p->pid == pid)
-      break;
-
-  return p;
-}
-
-/*------------------------------------------------------------------------*/
-
-static void
-delete_proc (void) 
-{
-  Child * c, * nextc;
-  Proc * p, * nextp;
-
-  for (p = proc_list; p; p = nextp)
-    {
-      nextp = p->next;
-      for (c = p->children; c; c = nextc) 
-	{
-	  nextc = c->next;
-          free (c);
-	}
-      free (p);
-    }
-  proc_list = 0;
-}
-
-/*------------------------------------------------------------------------*/
-
-static void
-add_proc (pid_t pid, pid_t ppid, long unsigned sjiffies, 
-	  long unsigned ujiffies, unsigned long vsize, long rsize)
-{
-  Proc *this, *parent;
-
-  if (!(this = find_proc (pid)))
-    this = new_proc (pid, ppid, sjiffies, ujiffies, vsize, rsize);
-  else
-    {
-      /* was already there, update sjiffies, ujiffies, vsize, rsize */
-      this->sjiffies = sjiffies;
-      this->ujiffies = ujiffies;
-      this->vsize = vsize;
-      this->rsize = rsize;
-      if (this->ppid != ppid)
-	{
-	  /* parent added before with ppid 0 */
-	  this->ppid = ppid;
-	}
-      return;
+      size_buffer = size_buffer ? 2*size_buffer : 128;
+      buffer = realloc (buffer, size_buffer);
+      if (!buffer)
+	perror ("buffer");
     }
 
-  if (pid == ppid)
-    ppid = 0;
+  buffer[pos_buffer++] = ch;
+}
 
-  if (!(parent = find_proc (ppid)))
-    parent = new_proc (ppid, 0, 0, 0, 0, 0);
-
-  add_child (parent, this);
-  this->parent = parent;
+static void
+fit_path (size_t len)
+{
+  if (len > size_path)
+    {
+      size_path = 2*len;
+      path = realloc (path, size_path);
+      if (!path)
+	perror ("path");
+    }
 }
 
 /*------------------------------------------------------------------------*/
-/* Uses a similar method as 'procps' for finding the process name in the
- * /proc filesystem. My thanks to Albert and procps authors.
- */
-static void
-read_proc ()
+
+static long
+forall_child_processes (long (*f)(Process*))
 {
-  int i, ch, tmp, size, pos, empty;
-  long unsigned ujiffies, sjiffies;
-  char *path, *buffer, *token;
-  unsigned long vsize;
+  long ujiffies, sjiffies, rsize;
   struct dirent *de;
-  pid_t pid, ppid;
+  int i, ch, empty;
+  char *token;
   FILE *file;
-  long rsize;
+  pid_t pid;
   DIR *dir;
 
-  buffer = malloc (size = 100);
+  long res = 0;
 
-  if (!(dir = opendir (Proc_BASE)))
+  if (!(dir = opendir (PROC_PATH)))
     {
-      perror (Proc_BASE);
+      perror (PROC_PATH);
       exit (1);
     }
 
   empty = 1;
+
 SKIP:
+
   while ((de = readdir (dir)) != NULL)
     {
+      Process p;
+
       empty = 0;
-      if ((pid = (pid_t) atoi (de->d_name)) == 0) continue;
-      if (!(path = malloc (strlen (Proc_BASE) + strlen (de->d_name) + 10)))
-	continue;
-      sprintf (path, "%s/%d/stat", Proc_BASE, pid);
+      pid = (pid_t) atoi (de->d_name);
+      if (pid == 0) continue;
+      fit_path (strlen (PROC_PATH) + strlen (de->d_name) + 20);
+      sprintf (path, "%s/%d/stat", PROC_PATH, pid);
       file = fopen (path, "r");
-      free (path);
       if (!file) continue;
-      pos = 0;
+
+      pos_buffer = 0;
       
       while ((ch = getc (file)) != EOF)
-	{
-	  if (pos >= size - 1)
-	    buffer = realloc (buffer, size *= 2);
-	  
-	  buffer[pos++] = ch;
-	}
+	push_buffer (ch);
       
       fclose (file);
 
-      if (pos >= size - 1)
-	buffer = realloc (buffer, size *= 2);
+      push_buffer (0);
       
-      buffer[pos++] = 0;
-      
-      ujiffies = sjiffies = -1;
-      vsize = 0;
-      rsize = 0;
+      p.pid = -1;
+      p.ppid = -1;
+      p.pgid = -1;
+
+      rsize = -1;
+      ujiffies = -1;
+      sjiffies = -1;
       
       token = strtok (buffer, " ");
       i = 0;
@@ -446,27 +364,25 @@ SKIP:
 	{
 	  switch (i++)
 	    {
-	    case VSIZE_POS:
-	      if (sscanf (token, "%lu", &vsize) != 1) goto SKIP;
+	    case PID_POS:
+	      if (sscanf (token, "%d", &p.pid) != 1) goto SKIP;
+	      if (p.pid == parent_pid) goto SKIP;
+	      break;
+	    case PPID_POS:
+	      if (sscanf (token, "%d", &p.ppid) != 1) goto SKIP;
+	      break;
+	    case PGID_POS:
+	      if (sscanf (token, "%d", &p.pgid) != 1) goto SKIP;
+	      if (p.pgid != group_pid) goto SKIP;
 	      break;
 	    case RSIZE_POS:
 	       if (sscanf (token, "%ld", &rsize) != 1) goto SKIP;
 	       break;
-	    case PID_POS:
-	      if (atoi (token) != pid) goto SKIP;
-	      break;
-	    case PPID_POS:
-	      if (sscanf (token, "%d", &ppid) != 1) goto SKIP;
-	      break;
 	    case STIME_POS:
-	      if (sscanf (token, "%d", &tmp) != 1) goto SKIP;
-	      sjiffies = tmp;
-	      assert (sjiffies >= 0);
+	      if (sscanf (token, "%ld", &sjiffies) != 1) goto SKIP;
 	      break;
 	    case UTIME_POS:
-	      if (sscanf (token, "%d", &tmp) != 1) goto SKIP;
-	      ujiffies = tmp;
-	      assert (usage >= 0);
+	      if (sscanf (token, "%ld", &ujiffies) != 1) goto SKIP;
 	      break;
 	    default:
 	      break;
@@ -474,103 +390,159 @@ SKIP:
 	  
 	  token = strtok (0, " ");
 	}
-      if (ujiffies < 0 || sjiffies < 0) goto SKIP;
-      add_proc (pid, ppid, ujiffies, sjiffies, vsize, rsize);
+      if (p.pid < 0) goto SKIP;
+      assert (p.pid != parent_pid);
+      if (p.pid != pid) goto SKIP;
+      if (p.ppid < 0) goto SKIP;
+      if (p.pgid < 0) goto SKIP;
+      assert (p.pgid == group_pid);
+      if (ujiffies < 0) goto SKIP;
+      if (sjiffies < 0) goto SKIP;
+      if (rsize < 0) goto SKIP;
+
+      p.time += (ujiffies + sjiffies) / (double) HZ;
+      p.mb += rsize / (double) (1 << 8);
+
+      res += f (&p);
     }
   
   (void) closedir (dir);
-  free (buffer);
+
   if (empty)
     {
-      fprintf (stderr, "%s is empty (not mounted ?)\n", Proc_BASE) ;
+      fprintf (stderr, "%s is empty (not mounted ?)\n", PROC_PATH) ;
       exit (1);
     }
+
+  return res;
 }
 
 /*------------------------------------------------------------------------*/
 
-static void
-sample_children (Child *cptr, double *time_ptr, double *mb_ptr)
+static double accumulated_time;
+static double sampled_time;
+static double sampled_mb;
+
+static Process * active;
+
+static Process * find_process (pid_t pid)
 {
-  while (cptr)
+  Process * res;
+  for (res = active; res; res = res->next)
+    if (res->pid == pid) break;
+  return res;
+}
+
+static long
+sample_process (Process * p)
+{
+  Process * q;
+
+  assert (p->pgid == group_pid);
+  assert (p->pid != parent_pid);
+
+  sampled_time += p->time;
+  sampled_mb += p->mb;
+
+  q = find_process (p->pid);
+  if (!q)
     {
-      children++;
-
-#ifdef DEBUGSAMPLE
-      fprintf(log, "ujiffies %lu\n", cptr->child->ujiffies); 
-      fprintf(log, "sjiffies %lu\n", cptr->child->sjiffies); 
-      fprintf(log, "result %f\n",
-              (cptr->child->ujiffies + cptr->child->sjiffies) / (double)HZ);
-      fprintf(log, "timeptr %f\n", *time_ptr);
-      fprintf(log, "pid: %d vsize %lu\n",
-              cptr->child->pid, cptr->child->vsize);
-#endif
-      *time_ptr +=
-        (cptr->child->ujiffies + cptr->child->sjiffies) / (double) HZ;
-
-      *mb_ptr += cptr->child->rsize / (double) (1 << 8);
-#ifdef DEBUGSAMPLE
-      fprintf(log, "timeptr(new) %f\n", *time_ptr);
-#endif
-      if (cptr->child->children)
-	sample_children (cptr->child->children, time_ptr, mb_ptr);
-
-      cptr = cptr->next;
+      q = malloc (sizeof *q);
+      if (!q) perror ("process");
+      q->pid = p->pid;
+      q->ppid = p->ppid;
+      q->pgid = p->pgid;
+      q->next = active;
+      q->mb = 0;
+      active = q;
     }
-  return;
-}
 
-/*------------------------------------------------------------------------*/
-/* should trace the memory and jiffies consumption recursively
- * 1. calls read_proc
- * 2. calls find_proc with pid
- * 3. goes through all the children
- */
-static int
-sample_recursive (double *time_ptr, double *mb_ptr)
-{
-  Proc *pr;
-
-  read_proc ();
-  pr = find_proc (child_pid);
-
-  if (!pr)
-    return 0;
-
-  *time_ptr = (pr->ujiffies + pr->sjiffies) / (double) HZ;
-  *mb_ptr = pr->rsize / (double) (1 << 8);
-
-  if (pr->children)
-    sample_children (pr->children, time_ptr, mb_ptr);
-
-  delete_proc ();
+  q->time = p->time;
+  if (q->mb < p->mb) q->mb = p->mb;
+  q->samples = num_samples;
 
   return 1;
 }
 
+static long
+sample_all_child_processes (void)
+{
+  Process * prev = 0, * p = active, * next;
+  long sampled = forall_child_processes (sample_process);
+  while (p)
+    {
+      next = p->next;
+      if (p->samples != num_samples)
+	{
+	  accumulated_time += p->time;
+	  if (prev) prev->next = next;
+	  else active = next;
+	  free (p);
+	}
+      else
+	prev = p;
+      p = next;
+    }
+  sampled_time += accumulated_time;
+  return sampled;
+}
+
 /*------------------------------------------------------------------------*/
 
-struct itimerval timer, old_timer;
+static struct itimerval timer;
+static struct itimerval old_timer;
+
 static int caught_out_of_memory;
 static int caught_out_of_time;
 
+static pthread_mutex_t caught_out_of_memory_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t caught_out_of_time_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 /*------------------------------------------------------------------------*/
 
-static void
-really_kill_child (void)
+static long
+term_process (Process * p)
 {
-  usleep (10000);
-  kill (child_pid, SIGTERM);
-  usleep (5000);
-  kill (child_pid, SIGTERM);
-  usleep (2000);
-  kill (child_pid, SIGTERM);
-  usleep (1000);
-  kill (child_pid, SIGKILL);
-  usleep (1000);
-  kill (child_pid, SIGKILL);
-  usleep (1000);
-  kill (child_pid, SIGKILL);
+  assert (p->pgid == group_pid);
+  assert (p->pid != parent_pid);
+  printf ("terminate %d\n", p->pid), fflush (stdout);
+  kill (p->pid, SIGTERM);
+  return 1;
+}
+
+static long
+kill_process (Process * p)
+{
+  assert (p->pgid == group_pid);
+  assert (p->pid != parent_pid);
+  printf ("killing %d\n", p->pid), fflush (stdout);
+  kill (p->pid, SIGKILL);
+  return 1;
+}
+
+static pthread_mutex_t kill_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void
+kill_all_child_processes (void)
+{
+  long ms = 16000;
+  long rounds = 0;
+  long killed;
+
+  do 
+    {
+      usleep (ms);
+
+      pthread_mutex_lock (&kill_mutex);
+
+      if (ms > 2000) killed = forall_child_processes (term_process);
+      else killed = forall_child_processes (kill_process);
+
+      pthread_mutex_unlock (&kill_mutex);
+
+      if (ms > 1000) ms /= 2;
+    }
+  while (killed > 0 && rounds++ < 10);
 }
 
 /*------------------------------------------------------------------------*/
@@ -616,48 +588,60 @@ report (double time, double mb)
 static void
 sampler (int s)
 {
-  double mb, time;
-  int res;
+  long sampled;
 
   assert (s == SIGALRM);
   num_samples++;
 
-  res = sample_recursive (&time, &mb);
+  sampled_time = sampled_mb = 0;
+  sampled = sample_all_child_processes ();
 
-  if (res)
+  if (sampled > 0)
     { 
-      if (mb > max_mb)
-	max_mb = mb;
+      if (sampled_mb > max_mb)
+	max_mb = sampled_mb;
 
-      if (time > max_seconds)
-	max_seconds = time;
+      if (sampled_time > max_seconds)
+	max_seconds = sampled_time;
     }
 
   if (++num_samples_since_last_report >= REPORT_RATE)
     {
       num_samples_since_last_report = 0;
-      if (res)
-	report (time, mb);
+      if (sampled > 0)
+	report (sampled_time, sampled_mb);
     }
 
-  if (res)
+  if (sampled > 0)
     {
-      if (time > time_limit || real_time () > real_time_limit)
+      if (sampled_time > time_limit || real_time () > real_time_limit)
 	{
+	  int already_caught;
+	  pthread_mutex_lock (&caught_out_of_time_mutex);
+	  already_caught = caught_out_of_time;
 	  caught_out_of_time = 1;
-	  really_kill_child ();
+	  pthread_mutex_unlock (&caught_out_of_time_mutex);
+	  if (!already_caught) kill_all_child_processes ();
 	}
-      else if (mb > space_limit)
+      else if (sampled_mb > space_limit)
 	{
+	  int already_caught;
+	  pthread_mutex_lock (&caught_out_of_memory_mutex);
+	  already_caught = caught_out_of_memory;
 	  caught_out_of_memory = 1;
-	  really_kill_child ();
+	  pthread_mutex_unlock (&caught_out_of_memory_mutex);
+	  if (!already_caught) kill_all_child_processes ();
+	  kill_all_child_processes ();
 	}
     }
 }
 
 /*------------------------------------------------------------------------*/
 
-static int caught_usr1_signal = 0;
+static volatile int caught_usr1_signal = 0;
+static volatile int caught_other_signal = 0;
+
+static pthread_mutex_t caught_other_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /*------------------------------------------------------------------------*/
 
@@ -666,6 +650,33 @@ sig_usr1_handler (int s)
 {
   assert (s == SIGUSR1);
   caught_usr1_signal = 1;
+}
+
+static void (*old_sig_int_handler);
+static void (*old_sig_segv_handler);
+static void (*old_sig_kill_handler);
+static void (*old_sig_term_handler);
+
+static void restore_signal_handlers () {
+  (void) signal (SIGINT, old_sig_int_handler);
+  (void) signal (SIGSEGV, old_sig_segv_handler);
+  (void) signal (SIGKILL, old_sig_kill_handler);
+  (void) signal (SIGTERM, old_sig_term_handler);
+}
+
+static void
+sig_other_handler (int s)
+{
+  int already_caught;
+  pthread_mutex_lock (&caught_other_signal_mutex);
+  already_caught = caught_other_signal;
+  caught_other_signal = 1;
+  pthread_mutex_unlock (&caught_other_signal_mutex);
+  if (already_caught) return;
+  restore_signal_handlers ();
+  kill_all_child_processes ();
+  usleep (10000);
+  raise (s);
 }
 
 /*------------------------------------------------------------------------*/
@@ -790,11 +801,15 @@ main (int argc, char **argv)
   fprintf (log, "[runlim] start:\t\t\t%s", ctime (&t));
   fflush (log);
 
-  signal (SIGUSR1, sig_usr1_handler);
-  parent_pid = getpid ();
+  (void) signal (SIGUSR1, sig_usr1_handler);
 
   start_time = wall_clock_time();
-  if ((child_pid = fork ()) != 0)
+
+  parent_pid = getpid ();
+  group_pid = getpgid (0);
+  child_pid = fork ();
+
+  if (child_pid != 0)
     {
       if (child_pid < 0)
 	{
@@ -804,7 +819,15 @@ main (int argc, char **argv)
       else
 	{
 	  status = 0;
-	  fprintf (log, "[runlim] main pid:\t\t%d\n", (int) child_pid);
+
+	  old_sig_int_handler = signal (SIGINT, sig_other_handler);
+	  old_sig_segv_handler = signal (SIGSEGV, sig_other_handler);
+	  old_sig_kill_handler = signal (SIGKILL, sig_other_handler);
+	  old_sig_term_handler = signal (SIGTERM, sig_other_handler);
+
+	  fprintf (log, "[runlim] parent pid:\t\t%d\n", (int) child_pid);
+	  fprintf (log, "[runlim] child pid:\t\t%d\n", (int) parent_pid);
+	  fprintf (log, "[runlim] group pid:\t\t%d\n", (int) group_pid);
 	  fflush (log);
 
 	  assert (SAMPLE_RATE < 1000000);
@@ -853,22 +876,17 @@ main (int argc, char **argv)
   else
     {
       unsigned hard_time_limit;
-      if (time_limit < real_time_limit) {
-	hard_time_limit = time_limit;
-	hard_time_limit = (hard_time_limit * 101 + 99) / 100;	// + 1%
-	l.rlim_cur = l.rlim_max = hard_time_limit;
-	setrlimit (RLIMIT_CPU, &l);
-      }
-#if 0
-      // After fixing this we figured that this would produce
-      // segfaults instead of memouts.  Thus uncommented and we
-      // have to rely on sampling instead.
-      //
-      l.rlim_cur = l.rlim_max = (rlim_t) space_limit * 1024 * 1024;
-      setrlimit (RLIMIT_AS, &l);
-#endif
+
+      if (time_limit < real_time_limit)
+	{
+	  hard_time_limit = time_limit;
+	  hard_time_limit = (hard_time_limit * 101 + 99) / 100;	// + 1%
+	  l.rlim_cur = l.rlim_max = hard_time_limit;
+	  setrlimit (RLIMIT_CPU, &l);
+	}
+
       execvp (argv[i], argv + i);
-      kill (getppid (), SIGUSR1);
+      kill (getppid (), SIGUSR1);		// TODO DOES THIS WORK?
       exit (1);
     }
 
@@ -880,6 +898,8 @@ main (int argc, char **argv)
     ok = OUT_OF_MEMORY;
   else if (caught_out_of_time)
     ok = OUT_OF_TIME;
+
+  kill_all_child_processes ();
 
   t = time (0);
   fprintf (log, "[runlim] end:\t\t\t%s", ctime (&t));
@@ -936,11 +956,15 @@ FORCE_OUT_OF_TIME_ENTRY:
   fprintf (log, "[runlim] real:\t\t\t%.2f seconds\n", real);
   fprintf (log, "[runlim] time:\t\t\t%.2f seconds\n", max_seconds);
   fprintf (log, "[runlim] space:\t\t\t%.1f MB\n", max_mb);
-  fprintf (log, "[runlim] samples:\t\t%u\n", num_samples);
+  fprintf (log, "[runlim] samples:\t\t%ld\n", num_samples);
 
   fflush (log);
-  if (close_log)
-    fclose (log);
+  if (close_log) fclose (log);
+
+  if (buffer) free (buffer);
+  if (path) free (path);
+
+  restore_signal_handlers ();
 
   if (propagate_signals)
     {

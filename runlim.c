@@ -20,7 +20,6 @@
 
 #define SAMPLE_RATE 10000	/* in milliseconds */
 #define REPORT_RATE 100		/* in terms of sampling */
-#define COMM_LEN 16
 
 /*------------------------------------------------------------------------*/
 

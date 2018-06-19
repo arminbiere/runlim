@@ -23,6 +23,12 @@
 
 /*------------------------------------------------------------------------*/
 
+#ifndef MAX_PROC
+#define MAX_PROC 32768		/* default on most Linux boxes */
+#endif
+
+/*------------------------------------------------------------------------*/
+
 typedef struct Process Process;
 typedef enum Status Status;
 
@@ -738,7 +744,7 @@ main (int argc, char **argv)
 	  else if (strcmp (argv[i], "-v") == 0 ||
 	           strcmp (argv[i], "--version") == 0)
 	    {
-	      printf ("%s\n", VERSION);
+	      printf ("%g\n", VERSION);
 	      exit (0);
 	    }
 	  else if (strcmp (argv[i], "-k") == 0 ||
@@ -787,7 +793,7 @@ main (int argc, char **argv)
   if (!log)
     log = stderr;
 
-  fprintf (log, "[runlim] version:\t\t%s\n", VERSION);
+  fprintf (log, "[runlim] version:\t\t%g\n", VERSION);
   fprintf (log, "[runlim] host:\t\t\t");
   print_host_name ();
   fputc ('\n', log);

@@ -9,35 +9,36 @@ do
   esac
   shift
 done
-echo "[configure.sh] version `cat VERSION`"
-[ x"$CC" = x ] && CC=gcc
+[ x"$CC" = x ] && COMPILE=gcc
 if [ x"$CFLAGS" = x ]
 then
-  case x"$CC" in
+  case x"$COMPILE" in
     xgcc)
-      CFLAGS="-Wall"
+      COMPILE="$COMPILE -Wall"
       if [ $debug = yes ]
       then
-	CFLAGS="$CFLAGS -g"
+	COMPILE="$COMPILE -g"
       else
-	CFLAGS="$CFLAGS -O3 -DNDEBUG"
+	COMPILE="$COMPILE -O3 -DNDEBUG"
       fi
       ;;
     *)
-      CFLAGS="-W"
+      COMPILE="-W"
       if [ $debug = yes ]
       then
-	CFLAGS="$CFLAGS -g"
+	COMPILE="$COMPILE -g"
       else
-	CFLAGS="$CFLAGS -O -DNDEBUG"
+	COMPILE="$COMPILE -O -DNDEBUG"
       fi
       ;;
   esac
 fi
-echo "[configure.sh] $CC $CFLAGS"
-rm -f makefile
-sed \
--e "s,@CC@,$CC," \
--e "s,@CFLAGS@,$CFLAGS," \
-makefile.in > makefile
-echo "[configure.sh] generated makefile"
+VERSION="`cat VERSION`"
+COMPILE="$COMPILE -DVERSION=$VERSION"
+if [ -f /proc/sys/kernel/pid_max ]
+then
+  PID_MAX=`cat /proc/sys/kernel/pid_max`
+  COMPILE="$COMPILE -DPIDX_MAX=$PID_MAX"
+fi
+echo "$COMPILE"
+sed -e "s,@COMPILE@,$COMPILE," makefile.in > makefile

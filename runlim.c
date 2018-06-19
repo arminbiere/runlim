@@ -102,6 +102,59 @@ usage (void)
 
 /*------------------------------------------------------------------------*/
 
+static FILE *log = 0;
+static int close_log = 0;
+
+/*------------------------------------------------------------------------*/
+
+static void
+error (const char * fmt, ...)
+{
+  va_list ap;
+  assert (log);
+  fputs ("runlim error: ", log);
+  va_start (ap, fmt);
+  vfprintf (log, fmt, ap);
+  fputc ('\n', log);
+  va_end (ap);
+  fflush (log);
+  exit (1);
+}
+
+static void
+warning (const char * fmt, ...)
+{
+  va_list ap;
+  assert (log);
+  fputs ("runlim warning: ", log);
+  va_start (ap, fmt);
+  vfprintf (log, fmt, ap);
+  fputc ('\n', log);
+  va_end (ap);
+  fflush (log);
+}
+
+static void
+message (const char * type, const char * fmt, ...)
+{
+  size_t len;
+  va_list ap;
+  assert (log);
+  fputs ("[runlim] ", log);
+  fputs (type, log);
+  fputc (':', log);
+  for (len = strlen (type); len < 22; len += 8)
+    fputc ('\t', log);
+  fputc ('\t', log);
+  va_start (ap, fmt);
+  vfprintf (log, fmt, ap);
+  va_end (ap);
+  fputc ('\n', log);
+  fflush (log);
+}
+
+/*------------------------------------------------------------------------*/
+
 static int
 isposnumber (const char *str)
 {
@@ -140,14 +193,8 @@ parse_number_argument (int *i, int argc, char **argv)
     }
   else
     {
-
 ARGUMENT_IS_MISSING:
-
-      fprintf (stderr,
-	       "*** runlim: number argument for '-%c' is missing\n",
-	       argv[*i][1]);
-      exit (1);
-
+      error ("number argument for '-%c' missing");
       res = 0;
     }
 
@@ -223,11 +270,6 @@ static int parent_pid = -1;
 
 /*------------------------------------------------------------------------*/
 
-static FILE *log = 0;
-static int close_log = 0;
-
-/*------------------------------------------------------------------------*/
-
 static long num_samples_since_last_report = 0;
 static long num_samples = 0;
 
@@ -238,54 +280,6 @@ static double max_memory = 0;
 
 static int propagate_signals = 0;
 static int children = 0;
-
-/*------------------------------------------------------------------------*/
-
-static void
-error (const char * fmt, ...)
-{
-  va_list ap;
-  assert (log);
-  fputs ("runlim error: ", log);
-  va_start (ap, fmt);
-  vfprintf (log, fmt, ap);
-  fputc ('\n', log);
-  va_end (ap);
-  fflush (log);
-  exit (1);
-}
-
-static void
-warning (const char * fmt, ...)
-{
-  va_list ap;
-  assert (log);
-  fputs ("runlim warning: ", log);
-  va_start (ap, fmt);
-  vfprintf (log, fmt, ap);
-  fputc ('\n', log);
-  va_end (ap);
-  fflush (log);
-}
-
-static void
-message (const char * type, const char * fmt, ...)
-{
-  size_t len;
-  va_list ap;
-  assert (log);
-  fputs ("[runlim] ", log);
-  fputs (type, log);
-  fputc (':', log);
-  for (len = strlen (type); len < 22; len += 8)
-    fputc ('\t', log);
-  fputc ('\t', log);
-  va_start (ap, fmt);
-  vfprintf (log, fmt, ap);
-  va_end (ap);
-  fputc ('\n', log);
-  fflush (log);
-}
 
 /*------------------------------------------------------------------------*/
 
@@ -480,8 +474,7 @@ NEXT:
       res++;
     }
   
-  if (closedir (dir))
-    warning ("failed to close directory '%s'", proc);
+  (void) closedir (dir);
 
   message ("read", "%ld", res);
 
@@ -642,7 +635,6 @@ static void
 term_process (Process * p)
 {
   assert (p->pid != parent_pid);
-  message ("terminate", "%ld", p->pid);
   kill (p->pid, SIGTERM);
 }
 
@@ -650,7 +642,6 @@ static void
 kill_process (Process * p)
 {
   assert (p->pid != parent_pid);
-  message ("killing", "%ld", p->pid);
   kill (p->pid, SIGKILL);
 }
 
@@ -661,10 +652,7 @@ kill_recursively (Process * p, void(*killer)(Process *))
   long res = 0;
 
   if (p->cyclic_killing)
-    {
-      warning ("cyclic process dependencies during killing");
-      return 0;
-    }
+    return 0;
 
   p->cyclic_killing = 1;
   for (child = p->child; child; child = child->sibbling)
@@ -866,13 +854,12 @@ get_host_name ()
     error ("can not open '%s' for reading", path);
 
   pos_buffer = 0;
-  while ((ch = getc (file)) != EOF)
+  while ((ch = getc (file)) != EOF && ch != '\n')
     push_buffer (ch);
 
   push_buffer (0);
 
-  if (fclose (file))
-    warning ("failed to close file '%s'", path);
+  (void) fclose (file);
 
   return buffer;
 }
@@ -901,6 +888,20 @@ get_pid_max ()
     warning ("failed to close file '%s'", path);
 
   return res;
+}
+
+/*------------------------------------------------------------------------*/
+
+static const char *
+ctime_without_new_line (time_t * t)
+{
+  const char * str, * p;
+  str = ctime (t);
+  pos_buffer = 0;
+  for (p = str; *p && *p != '\n'; p++)
+    push_buffer (*p);
+  push_buffer (0);
+  return buffer;
 }
 
 /*------------------------------------------------------------------------*/
@@ -995,10 +996,14 @@ main (int argc, char **argv)
   message ("space limit", "%u MB", space_limit);
 
   for (j = i; j < argc; j++)
-    message ("argv[%d]", "%s", j - i, argv[j]);
+    {
+      char argstr[80];
+      sprintf (argstr, "argv[%d]", j - i);
+      message (argstr, "%s", argv[j]);
+    }
 
   t = time (0);
-  message ("start", "%s", ctime (&t));
+  message ("start", "%s", ctime_without_new_line (&t));
 
   (void) signal (SIGUSR1, sig_usr1_handler);
 
@@ -1099,7 +1104,7 @@ main (int argc, char **argv)
   kill_all_child_processes ();
 
   t = time (0);
-  message ("end", "%s", ctime (&t));
+  message ("end", "%s", ctime_without_new_line (&t));
 
   if (max_time >= time_limit || real_time () >= real_time_limit)
     goto FORCE_OUT_OF_TIME_ENTRY;

@@ -25,7 +25,7 @@
 /*------------------------------------------------------------------------*/
 
 #ifndef PID_MAX			/* usually set by 'configure.sh' */
-#define PID_MAX 32768		/* default on most Linux boxes */
+#define PID_MAX 32768		/* default on Linux it seems */
 #endif
 
 /*------------------------------------------------------------------------*/
@@ -52,12 +52,16 @@ enum Status
 
 struct Process
 {
-  pid_t pid;
-  pid_t ppid;
+  char active;
+  char cyclic_sampling;
+  char cyclic_killing;
+  long pid;
+  long ppid;
+  long sampled;
   double time;
-  double mb;
-  long samples;
+  double memory;
   Process * next;
+  Process * child;
   Process * parent;
   Process * sibbling;
 };
@@ -93,6 +97,7 @@ static void
 usage (void)
 {
   printf (USAGE);
+  fflush (stdout);
 }
 
 /*------------------------------------------------------------------------*/
@@ -227,8 +232,8 @@ static int close_log = 0;
 static long num_samples_since_last_report = 0;
 static long num_samples = 0;
 
-static double max_mb = 0;
-static double max_seconds = 0;
+static double max_time = 0;
+static double max_memory = 0;
 
 /*------------------------------------------------------------------------*/
 
@@ -342,55 +347,88 @@ fit_path (size_t len)
 
 static long pid_max;
 static Process process[PID_MAX];
+static Process * active;
+static pthread_mutex_t active_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void
+add_process (pid_t pid, pid_t ppid, double time, double memory)
+{
+  Process * p;
+
+  assert (0 < pid);
+  assert (pid < pid_max);
+  assert (0 <= ppid); 
+  assert (ppid < pid_max);
+
+  p = process + pid;
+  
+  if (p->active && p->ppid)
+    {
+      assert (p->pid == pid);
+      p->time = time;
+      if (p->memory < memory)
+	p->memory = memory;
+    }
+  else
+    {
+      assert (!p->active);
+      p->active = 1;
+      p->pid = pid;
+      p->ppid = ppid;
+      p->time = time;
+      p->memory = memory;
+      p->next = 0;
+      if (active) active->next = p;
+      else active = p;
+    }
+
+  p->sampled = num_samples;
+}
 
 /*------------------------------------------------------------------------*/
 
-#define PROC_PATH    "/proc"
-
 static long
-forall_child_processes (long (*f)(Process*))
+read_processes (void)
 {
   long ujiffies, sjiffies, rsize;
+  const char * proc = "/proc";
+  long pid, ppid, tmpid;
+  double time, memory;
   struct dirent *de;
-  int i, ch, empty;
   char *token;
   FILE *file;
-  pid_t pid;
+  int i, ch;
   DIR *dir;
 
   long res = 0;
 
-  if (!(dir = opendir (PROC_PATH)))
-    error ("can not open directory '%s'", PROC_PATH);
+  if (!(dir = opendir (proc)))
+    error ("can not open directory '%s'", proc);
 
-  empty = 1;
-
-SKIP:
+NEXT:
 
   while ((de = readdir (dir)) != NULL)
     {
-      Process p;
-
-      empty = 0;
       pid = (pid_t) atoi (de->d_name);
-      if (pid == 0) continue;
-      fit_path (strlen (PROC_PATH) + strlen (de->d_name) + 20);
-      sprintf (path, "%s/%d/stat", PROC_PATH, pid);
+      if (pid == 0) goto NEXT;
+      if (pid >= pid_max) goto NEXT;
+
+      fit_path (strlen (proc) + strlen (de->d_name) + 20);
+      sprintf (path, "%s/%ld/stat", proc, pid);
       file = fopen (path, "r");
-      if (!file) continue;
+      if (!file) goto NEXT;
 
       pos_buffer = 0;
       
       while ((ch = getc (file)) != EOF)
 	push_buffer (ch);
       
-      fclose (file);
+      (void) fclose (file);	/* ignore return value */
 
       push_buffer (0);
       
-      p.pid = -1;
-      p.ppid = -1;
-
+      ppid = -1;
+      tmpid = -1;
       rsize = -1;
       ujiffies = -1;
       sjiffies = -1;
@@ -403,19 +441,22 @@ SKIP:
 	  switch (i++)
 	    {
 	    case PID_POS:
-	      if (sscanf (token, "%d", &p.pid) != 1) goto SKIP;
+	      if (sscanf (token, "%ld", &tmpid) != 1) goto NEXT;
+	      if (tmpid != pid) goto NEXT;
 	      break;
 	    case PPID_POS:
-	      if (sscanf (token, "%d", &p.ppid) != 1) goto SKIP;
+	      if (sscanf (token, "%ld", &ppid) != 1) goto NEXT;
+	      if (ppid < 0) goto NEXT;
+	      if (ppid >= pid_max) goto NEXT;
 	      break;
 	    case RSIZE_POS:
-	       if (sscanf (token, "%ld", &rsize) != 1) goto SKIP;
+	       if (sscanf (token, "%ld", &rsize) != 1) goto NEXT;
 	       break;
 	    case STIME_POS:
-	      if (sscanf (token, "%ld", &sjiffies) != 1) goto SKIP;
+	      if (sscanf (token, "%ld", &sjiffies) != 1) goto NEXT;
 	      break;
 	    case UTIME_POS:
-	      if (sscanf (token, "%ld", &ujiffies) != 1) goto SKIP;
+	      if (sscanf (token, "%ld", &ujiffies) != 1) goto NEXT;
 	      break;
 	    default:
 	      break;
@@ -424,93 +465,155 @@ SKIP:
 	  token = strtok (0, " ");
 	}
 
-      if (p.pid < 0) goto SKIP;
-      if (p.ppid < 0) goto SKIP;
-      if (ujiffies < 0) goto SKIP;
-      if (sjiffies < 0) goto SKIP;
-      if (rsize < 0) goto SKIP;
+      if (tmpid < 0) goto NEXT;
+      assert (tmpid == pid);
+      if (ppid < 0) goto NEXT;
+      if (ujiffies < 0) goto NEXT;
+      if (sjiffies < 0) goto NEXT;
+      if (rsize < 0) goto NEXT;
 
-      p.time += (ujiffies + sjiffies) / (double) HZ;
-      p.mb += rsize / (double) (1 << 8);
+      time += (ujiffies + sjiffies) / (double) HZ;
+      memory += rsize * (double) (1 << 8);
 
-      res += f (&p);
+      add_process (pid, ppid, time, memory);
     }
   
   if (closedir (dir))
-    warning ("failed to close directory '%s'", PROC_PATH);
+    warning ("failed to close directory '%s'", proc);
 
-  if (empty)
-    error ("directory '%s' empty", PROC_PATH);
+  return res;
+}
+
+static Process *
+find_process (long pid)
+{
+  assert (0 <= pid);
+  assert (pid < pid_max);
+  return process + pid;
+}
+
+static void
+clear_tree_connections (Process * p)
+{
+  p->parent = p->child = p->sibbling = 0;
+}
+
+static void
+connect_process_tree (void)
+{
+  Process * p, * parent;
+
+  for (p = active; p; p = p->next)
+    {
+      assert (p->active);
+      assert (find_process (p->pid) == p);
+      parent = find_process (p->ppid);
+      clear_tree_connections (parent);
+      clear_tree_connections (p);
+    }
+
+  for (p = active; p; p = p->next)
+    {
+      parent = find_process (p->ppid);
+      p->parent = parent;
+      if (parent->child) parent->child->sibbling = p;
+      else parent->child = p;
+    }
+}
+
+/*------------------------------------------------------------------------*/
+
+static double accumulated_time;
+
+/*------------------------------------------------------------------------*/
+
+static long
+flush_inactive_processes (void)
+{
+  Process * prev = 0, * p, * next;
+  long res = 0;
+
+  for (p = active; p; p = next)
+    {
+      assert (p->active);
+      next = p->next;
+      if (p->sampled == num_samples)
+	{
+	  prev = p;
+	}
+      else
+	{
+	  if (prev) prev->next = next;
+	  else active = next;
+
+	  accumulated_time += p->time;
+	  p->active = 0;
+	  res++;
+	}
+    }
 
   return res;
 }
 
 /*------------------------------------------------------------------------*/
 
-static double accumulated_time;
 static double sampled_time;
-static double sampled_mb;
+static double sampled_memory;
 
-static Process * active;
-
-static Process * find_process (pid_t pid)
-{
-  Process * res;
-  for (res = active; res; res = res->next)
-    if (res->pid == pid) break;
-  return res;
-}
+/*------------------------------------------------------------------------*/
 
 static long
-sample_process (Process * p)
+sample_recursively (Process * p)
 {
-  Process * q;
+  Process * child;
+  long res = 0;
 
-  assert (p->pid != parent_pid);
-
-  sampled_time += p->time;
-  sampled_mb += p->mb;
-
-  q = find_process (p->pid);
-  if (!q)
+  if (p->cyclic_sampling)
     {
-      q = malloc (sizeof *q);
-      if (!q)
-	error ("out-of-memory allocating process");
-      q->pid = p->pid;
-      q->ppid = p->ppid;
-      q->next = active;
-      q->mb = 0;
-      active = q;
+      warning ("cyclic process dependencies during sampling");
+      return 0;
     }
 
-  q->time = p->time;
-  if (q->mb < p->mb) q->mb = p->mb;
-  q->samples = num_samples;
+  if (p->sampled == num_samples)
+    {
+      sampled_time += p->time;
+      sampled_memory += p->memory;
+    }
 
-  return 1;
+  p->cyclic_sampling = 1;
+
+  for (child = p->child; child; child = child->sibbling)
+    res += sample_recursively (child);
+
+  assert (p->cyclic_sampling);
+  p->cyclic_sampling = 0;
+  
+  return res;
 }
 
 static long
 sample_all_child_processes (void)
 {
-  Process * prev = 0, * p = active, * next;
-  long sampled = forall_child_processes (sample_process);
-  while (p)
+  long read, sampled;
+  Process * p;
+
+  pthread_mutex_lock (&active_mutex);
+
+  read = read_processes ();
+  connect_process_tree ();
+
+  if (read > 0)
     {
-      next = p->next;
-      if (p->samples != num_samples)
-	{
-	  accumulated_time += p->time;
-	  if (prev) prev->next = next;
-	  else active = next;
-	  free (p);
-	}
-      else
-	prev = p;
-      p = next;
+      p = find_process (child_pid);
+      sampled = sample_recursively (p);
     }
-  sampled_time += accumulated_time;
+  else
+    sampled = 0;
+
+  sampled += flush_inactive_processes ();
+
+  pthread_mutex_unlock (&active_mutex);
+
   return sampled;
 }
 
@@ -527,22 +630,45 @@ static pthread_mutex_t caught_out_of_time_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /*------------------------------------------------------------------------*/
 
-static long
+static void
 term_process (Process * p)
 {
   assert (p->pid != parent_pid);
-  printf ("terminate %d\n", p->pid), fflush (stdout);
+  printf ("terminate %ld\n", p->pid), fflush (stdout);
   kill (p->pid, SIGTERM);
-  return 1;
 }
 
-static long
+static void
 kill_process (Process * p)
 {
   assert (p->pid != parent_pid);
-  printf ("killing %d\n", p->pid), fflush (stdout);
+  printf ("killing %ld\n", p->pid), fflush (stdout);
   kill (p->pid, SIGKILL);
-  return 1;
+}
+
+static long
+kill_recursively (Process * p, void(*killer)(Process *))
+{
+  Process * child;
+  long res = 0;
+
+  if (p->cyclic_killing)
+    {
+      warning ("cyclic process dependencies during killing");
+      return 0;
+    }
+
+  p->cyclic_killing = 1;
+  for (child = p->child; child; child = child->sibbling)
+    res += kill_recursively (child, killer);
+  assert (p->cyclic_killing);
+  p->cyclic_killing = 0;
+  usleep (100);
+
+  killer (p);
+  res++;
+
+  return res;
 }
 
 static pthread_mutex_t kill_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -552,17 +678,33 @@ kill_all_child_processes (void)
 {
   long ms = 16000;
   long rounds = 0;
+  Process * p;
   long killed;
+  long read;
+
+  static void (*killer) (Process *);
 
   do 
     {
       usleep (ms);
 
+      if (ms > 2000) killer = term_process;
+      else killer = kill_process;
+
       pthread_mutex_lock (&kill_mutex);
+      pthread_mutex_lock (&active_mutex);
 
-      if (ms > 2000) killed = forall_child_processes (term_process);
-      else killed = forall_child_processes (kill_process);
+      read = read_processes ();
 
+      if (read > 0)
+	{
+	  connect_process_tree ();
+	  p = find_process (child_pid);
+	  killed = kill_recursively (p, killer);
+	}
+      else killed = 0;
+
+      pthread_mutex_unlock (&active_mutex);
       pthread_mutex_unlock (&kill_mutex);
 
       if (ms > 1000) ms /= 2;
@@ -614,23 +756,23 @@ sampler (int s)
   assert (s == SIGALRM);
   num_samples++;
 
-  sampled_time = sampled_mb = 0;
+  sampled_time = sampled_memory = 0;
   sampled = sample_all_child_processes ();
 
   if (sampled > 0)
     { 
-      if (sampled_mb > max_mb)
-	max_mb = sampled_mb;
+      if (sampled_memory > max_memory)
+	max_memory = sampled_memory;
 
-      if (sampled_time > max_seconds)
-	max_seconds = sampled_time;
+      if (sampled_time > max_time)
+	max_time = sampled_time;
     }
 
   if (++num_samples_since_last_report >= REPORT_RATE)
     {
       num_samples_since_last_report = 0;
       if (sampled > 0)
-	report (sampled_time, sampled_mb);
+	report (sampled_time, sampled_memory);
     }
 
   if (sampled > 0)
@@ -644,7 +786,7 @@ sampler (int s)
 	  pthread_mutex_unlock (&caught_out_of_time_mutex);
 	  if (!already_caught) kill_all_child_processes ();
 	}
-      else if (sampled_mb > space_limit)
+      else if (sampled_memory > space_limit)
 	{
 	  int already_caught;
 	  pthread_mutex_lock (&caught_out_of_memory_mutex);
@@ -652,7 +794,6 @@ sampler (int s)
 	  caught_out_of_memory = 1;
 	  pthread_mutex_unlock (&caught_out_of_memory_mutex);
 	  if (!already_caught) kill_all_child_processes ();
-	  kill_all_child_processes ();
 	}
     }
 }
@@ -972,7 +1113,7 @@ main (int argc, char **argv)
   t = time (0);
   message ("end", "%s", ctime (&t));
 
-  if (max_seconds >= time_limit || real_time () >= real_time_limit)
+  if (max_time >= time_limit || real_time () >= real_time_limit)
     goto FORCE_OUT_OF_TIME_ENTRY;
 
   switch (ok)
@@ -1021,8 +1162,8 @@ FORCE_OUT_OF_TIME_ENTRY:
   message ("result", "%d", res);
   message ("children", "%d", children);
   message ("real", "%.2f seconds", real);
-  message ("time", "%.2f seconds", max_seconds);
-  message ("space", "%.1f MB", max_mb);
+  message ("time", "%.2f seconds", max_time);
+  message ("space", "%.1f MB", max_memory);
   message ("samples", "%ld", num_samples);
 
   if (close_log)

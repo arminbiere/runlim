@@ -344,7 +344,9 @@ static long pid_max;
 static long page_size;
 static Process process[PID_MAX];
 static Process * active;
-static pthread_mutex_t active_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static pthread_mutex_t killing_mutex = PTHREAD_MUTEX_INITIALIZER;
+static volatile int killing;
 
 static void
 add_process (pid_t pid, pid_t ppid, double time, double memory)
@@ -597,8 +599,6 @@ sample_all_child_processes (void)
   long read, sampled;
   Process * p;
 
-  pthread_mutex_lock (&active_mutex);
-
   read = read_processes ();
   connect_process_tree ();
 
@@ -611,8 +611,7 @@ sample_all_child_processes (void)
     sampled = 0;
 
   sampled += flush_inactive_processes ();
-
-  pthread_mutex_unlock (&active_mutex);
+  sampled_time += accumulated_time;
 
   return sampled;
 }
@@ -622,11 +621,8 @@ sample_all_child_processes (void)
 static struct itimerval timer;
 static struct itimerval old_timer;
 
-static int caught_out_of_memory;
-static int caught_out_of_time;
-
-static pthread_mutex_t caught_out_of_memory_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t caught_out_of_time_mutex = PTHREAD_MUTEX_INITIALIZER;
+static volatile int caught_out_of_memory;
+static volatile int caught_out_of_time;
 
 /*------------------------------------------------------------------------*/
 
@@ -666,8 +662,6 @@ kill_recursively (Process * p, void(*killer)(Process *))
   return res;
 }
 
-static pthread_mutex_t kill_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 static void
 kill_all_child_processes (void)
 {
@@ -675,7 +669,13 @@ kill_all_child_processes (void)
   long rounds = 0;
   Process * p;
   long killed;
+  int ignore;
   long read;
+
+  pthread_mutex_lock (&killing_mutex);
+  if (!(ignore = killing)) killing = 1;
+  pthread_mutex_unlock (&killing_mutex);
+  if (ignore) return;
 
   static void (*killer) (Process *);
 
@@ -684,10 +684,8 @@ kill_all_child_processes (void)
       if (ms > 2000) killer = term_process;
       else killer = kill_process;
 
-      pthread_mutex_lock (&kill_mutex);
-      pthread_mutex_lock (&active_mutex);
-
       read = read_processes ();
+      killed = 0;
 
       if (read > 0)
 	{
@@ -695,15 +693,10 @@ kill_all_child_processes (void)
 	  p = find_process (child_pid);
 	  if (p->active)
 	    killed = kill_recursively (p, killer);
-	  else killed = 0;
 	}
-      else killed = 0;
-
-      pthread_mutex_unlock (&active_mutex);
-      pthread_mutex_unlock (&kill_mutex);
 
       if (!killed) break;
-      if (rounds++ > 10) break;
+      if (rounds++ > 9) break;
 
       usleep (ms);
       if (ms > 1000) ms /= 2;
@@ -752,8 +745,16 @@ static void
 sampler (int s)
 {
   long sampled;
+  int ignore;
 
   assert (s == SIGALRM);
+
+  pthread_mutex_lock (&killing_mutex);
+  ignore = killing;
+  pthread_mutex_unlock (&killing_mutex);
+  
+  if (ignore) return;
+
   num_samples++;
 
   sampled_time = sampled_memory = 0;
@@ -779,21 +780,19 @@ sampler (int s)
     {
       if (sampled_time > time_limit || real_time () > real_time_limit)
 	{
-	  int already_caught;
-	  pthread_mutex_lock (&caught_out_of_time_mutex);
-	  already_caught = caught_out_of_time;
-	  caught_out_of_time = 1;
-	  pthread_mutex_unlock (&caught_out_of_time_mutex);
-	  if (!already_caught) kill_all_child_processes ();
+	  if (!caught_out_of_time)
+	    {
+	      caught_out_of_time = 1;
+	      kill_all_child_processes ();
+	    }
 	}
       else if (sampled_memory > space_limit)
 	{
-	  int already_caught;
-	  pthread_mutex_lock (&caught_out_of_memory_mutex);
-	  already_caught = caught_out_of_memory;
-	  caught_out_of_memory = 1;
-	  pthread_mutex_unlock (&caught_out_of_memory_mutex);
-	  if (!already_caught) kill_all_child_processes ();
+	  if (!caught_out_of_memory)
+	    {
+	      caught_out_of_memory = 1;
+	      kill_all_child_processes ();
+	    }
 	}
     }
 }
@@ -840,8 +839,8 @@ sig_other_handler (int s)
   if (already_caught) return;
   restore_signal_handlers ();
   kill_all_child_processes ();
-  usleep (10000);
-  raise (s);
+  usleep (1000);
+  // raise (s);
 }
 
 /*------------------------------------------------------------------------*/
@@ -1040,6 +1039,7 @@ main (int argc, char **argv)
 	  timer.it_interval.tv_sec = 0;
 	  timer.it_interval.tv_usec = SAMPLE_RATE;
 	  timer.it_value = timer.it_interval;
+
 	  signal (SIGALRM, sampler);
 	  setitimer (ITIMER_REAL, &timer, &old_timer);
 

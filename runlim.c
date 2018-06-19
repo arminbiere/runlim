@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,7 +54,6 @@ struct Process
 {
   pid_t pid;
   pid_t ppid;
-  pid_t pgid;
   double time;
   double mb;
   long samples;
@@ -71,9 +71,6 @@ struct Process
 "    --help\n" \
 "\n" \
 "    --version                  print version number\n" \
-"\n" \
-"    -o <file>                  overwrite or create <file> for logging\n" \
-"    --output-file=<file>\n" \
 "\n" \
 "    --space-limit=<number>     set space limit to <number> MB\n" \
 "    -s <number>\n"\
@@ -199,29 +196,6 @@ parse_number_rhs (char *str)
 
 /*------------------------------------------------------------------------*/
 
-static FILE *
-open_log (const char *name, const char *option)
-{
-  FILE *res;
-
-  if (!name || !name[0])
-    {
-      fprintf (stderr, "*** runlim: argument to '%s' is missing\n", option);
-      exit (1);
-    }
-
-  res = fopen (name, "w");
-  if (!res)
-    {
-      fprintf (stderr, "*** runlim: could not write to '%s'\n", name);
-      exit (1);
-    }
-
-  return res;
-}
-
-/*------------------------------------------------------------------------*/
-
 static unsigned
 get_physical_mb ()
 {
@@ -255,12 +229,60 @@ static int children = 0;
 
 /*------------------------------------------------------------------------*/
 
+static void
+error (const char * fmt, ...)
+{
+  va_list ap;
+  assert (log);
+  fputs ("runlim error: ", log);
+  va_start (ap, fmt);
+  vfprintf (log, fmt, ap);
+  fputc ('\n', log);
+  va_end (ap);
+  fflush (log);
+  exit (1);
+}
+
+static void
+warning (const char * fmt, ...)
+{
+  va_list ap;
+  assert (log);
+  fputs ("runlim warning: ", log);
+  va_start (ap, fmt);
+  vfprintf (log, fmt, ap);
+  fputc ('\n', log);
+  va_end (ap);
+  fflush (log);
+}
+
+static void
+message (const char * type, const char * fmt, ...)
+{
+  size_t len;
+  va_list ap;
+  assert (log);
+  fputs ("[runlim] ", log);
+  fputs (type, log);
+  fputc (':', log);
+  for (len = strlen (type); len < 22; len += 8)
+    fputc ('\t', log);
+  fputc ('\t', log);
+  va_start (ap, fmt);
+  vfprintf (log, fmt, ap);
+  va_end (ap);
+  fputc ('\n', log);
+  fflush (log);
+}
+
+/*------------------------------------------------------------------------*/
+
 #define PID_POS 0
 #define PPID_POS 3
-#define PGID_POS 4
 #define STIME_POS 13
 #define UTIME_POS 14
 #define RSIZE_POS 23
+#define MAX_POS 23
 
 /*------------------------------------------------------------------------*/
 
@@ -270,8 +292,6 @@ static unsigned real_time_limit;
 static unsigned space_limit;
 
 /*------------------------------------------------------------------------*/
-
-#define PROC_PATH    "/proc"
 
 static char * buffer;
 static size_t size_buffer;
@@ -309,6 +329,8 @@ fit_path (size_t len)
 }
 
 /*------------------------------------------------------------------------*/
+
+#define PROC_PATH    "/proc"
 
 static long
 forall_child_processes (long (*f)(Process*))
@@ -356,7 +378,6 @@ SKIP:
       
       p.pid = -1;
       p.ppid = -1;
-      p.pgid = -1;
 
       rsize = -1;
       ujiffies = -1;
@@ -365,20 +386,15 @@ SKIP:
       token = strtok (buffer, " ");
       i = 0;
       
-      while (token)
+      while (token && i <= MAX_POS)
 	{
 	  switch (i++)
 	    {
 	    case PID_POS:
 	      if (sscanf (token, "%d", &p.pid) != 1) goto SKIP;
-	      if (p.pid == parent_pid) goto SKIP;
 	      break;
 	    case PPID_POS:
 	      if (sscanf (token, "%d", &p.ppid) != 1) goto SKIP;
-	      break;
-	    case PGID_POS:
-	      if (sscanf (token, "%d", &p.pgid) != 1) goto SKIP;
-	      if (p.pgid != group_pid) goto SKIP;
 	      break;
 	    case RSIZE_POS:
 	       if (sscanf (token, "%ld", &rsize) != 1) goto SKIP;
@@ -395,12 +411,9 @@ SKIP:
 	  
 	  token = strtok (0, " ");
 	}
+
       if (p.pid < 0) goto SKIP;
-      assert (p.pid != parent_pid);
-      if (p.pid != pid) goto SKIP;
       if (p.ppid < 0) goto SKIP;
-      if (p.pgid < 0) goto SKIP;
-      assert (p.pgid == group_pid);
       if (ujiffies < 0) goto SKIP;
       if (sjiffies < 0) goto SKIP;
       if (rsize < 0) goto SKIP;
@@ -443,7 +456,6 @@ sample_process (Process * p)
 {
   Process * q;
 
-  assert (p->pgid == group_pid);
   assert (p->pid != parent_pid);
 
   sampled_time += p->time;
@@ -456,7 +468,6 @@ sample_process (Process * p)
       if (!q) perror ("process");
       q->pid = p->pid;
       q->ppid = p->ppid;
-      q->pgid = p->pgid;
       q->next = active;
       q->mb = 0;
       active = q;
@@ -508,7 +519,6 @@ static pthread_mutex_t caught_out_of_time_mutex = PTHREAD_MUTEX_INITIALIZER;
 static long
 term_process (Process * p)
 {
-  assert (p->pgid == group_pid);
   assert (p->pid != parent_pid);
   printf ("terminate %d\n", p->pid), fflush (stdout);
   kill (p->pid, SIGTERM);
@@ -518,7 +528,6 @@ term_process (Process * p)
 static long
 kill_process (Process * p)
 {
-  assert (p->pgid == group_pid);
   assert (p->pid != parent_pid);
   printf ("killing %d\n", p->pid), fflush (stdout);
   kill (p->pid, SIGKILL);
@@ -703,14 +712,42 @@ main (int argc, char **argv)
 {
   int i, j, res, status, s, ok;
   struct rlimit l;
-  const char *p;
   double real;
   time_t t;
 
+  log = stderr;
+  assert (!close_log);
+
+#if 0
+  i = 0;
+  message ("1", "%d", i++);
+  message ("12", "%d", i++);
+  message ("123", "%d", i++);
+  message ("1234", "%d", i++);
+  message ("12345", "%d", i++);
+  message ("123456", "%d", i++);
+  message ("1234567", "%d", i++);
+  message ("12345678", "%d", i++);
+  message ("123456789", "%d", i++);
+  message ("1234567890", "%d", i++);
+  message ("12345678901", "%d", i++);
+  message ("123456789012", "%d", i++);
+  message ("1234567890123", "%d", i++);
+  message ("12345678901234", "%d", i++);
+  message ("123456789012345", "%d", i++);
+  message ("1234567890123456", "%d", i++);
+  message ("12345678901234567", "%d", i++);
+  message ("123456789012345678", "%d", i++);
+  message ("1234567890123456789", "%d", i++);
+  message ("12345678901234567890", "%d", i++);
+  exit (1);
+#endif
+
   ok = OK;				/* status of the runlim */
   s = 0;				/* signal caught */
+
   time_limit = 60 * 60 * 24 * 3600;	/* one year */
-  real_time_limit = time_limit;
+  real_time_limit = time_limit;		/* same as time limit by default */
   space_limit = get_physical_mb ();	/* physical memory size */
 
   for (i = 1; i < argc; i++)
@@ -758,21 +795,6 @@ main (int argc, char **argv)
 	      usage ();
 	      exit (0);
 	    }
-	  else if (argv[i][1] == 'o')
-	    {
-	      if (argv[i][2])
-		log = open_log (argv[i] + 2, "-o");
-	      else
-		log = open_log (i + 1 >= argc ? 0 : argv[++i], "-o");
-
-	      close_log = 1;
-	    }
-	  else if (strstr (argv[i], "--output-file=") == argv[i])
-	    {
-	      p = strchr (argv[i], '=');
-	      assert (p);
-	      log = open_log (p + 1, "--output-file");
-	    }
 	  else
 	    {
 	      fprintf (stderr, "*** runlim: invalid option '%s' (try '-h')\n",
@@ -790,18 +812,18 @@ main (int argc, char **argv)
       exit (1);
     }
 
-  if (!log)
-    log = stderr;
-
   fprintf (log, "[runlim] version:\t\t%g\n", VERSION);
   fprintf (log, "[runlim] host:\t\t\t");
   print_host_name ();
   fputc ('\n', log);
+
   fprintf (log, "[runlim] time limit:\t\t%u seconds\n", time_limit);
   fprintf (log, "[runlim] real time limit:\t%u seconds\n", real_time_limit);
   fprintf (log, "[runlim] space limit:\t\t%u MB\n", space_limit);
+
   for (j = i; j < argc; j++)
     fprintf (log, "[runlim] argv[%d]:\t\t%s\n", j - i, argv[j]);
+
   t = time (0);
   fprintf (log, "[runlim] start:\t\t\t%s", ctime (&t));
   fflush (log);
@@ -811,7 +833,6 @@ main (int argc, char **argv)
   start_time = wall_clock_time();
 
   parent_pid = getpid ();
-  group_pid = getpgid (0);
   child_pid = fork ();
 
   if (child_pid != 0)

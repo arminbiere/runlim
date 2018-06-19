@@ -220,7 +220,6 @@ get_physical_mb ()
 
 static int child_pid = -1;
 static int parent_pid = -1;
-static int group_pid = -1;
 
 /*------------------------------------------------------------------------*/
 
@@ -346,6 +345,7 @@ fit_path (size_t len)
 /*------------------------------------------------------------------------*/
 
 static long pid_max;
+static long page_size;
 static Process process[PID_MAX];
 static Process * active;
 static pthread_mutex_t active_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -362,7 +362,7 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
 
   p = process + pid;
   
-  if (p->active && p->ppid)
+  if (p->active)
     {
       assert (p->pid == pid);
       p->time = time;
@@ -390,7 +390,7 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
 static long
 read_processes (void)
 {
-  long ujiffies, sjiffies, rsize;
+  long ujiffies, sjiffies, rss;
   const char * proc = "/proc";
   long pid, ppid, tmpid;
   double time, memory;
@@ -429,7 +429,7 @@ NEXT:
       
       ppid = -1;
       tmpid = -1;
-      rsize = -1;
+      rss = -1;
       ujiffies = -1;
       sjiffies = -1;
       
@@ -450,7 +450,7 @@ NEXT:
 	      if (ppid >= pid_max) goto NEXT;
 	      break;
 	    case RSIZE_POS:
-	       if (sscanf (token, "%ld", &rsize) != 1) goto NEXT;
+	       if (sscanf (token, "%ld", &rss) != 1) goto NEXT;
 	       break;
 	    case STIME_POS:
 	      if (sscanf (token, "%ld", &sjiffies) != 1) goto NEXT;
@@ -470,16 +470,20 @@ NEXT:
       if (ppid < 0) goto NEXT;
       if (ujiffies < 0) goto NEXT;
       if (sjiffies < 0) goto NEXT;
-      if (rsize < 0) goto NEXT;
+      if (rss < 0) goto NEXT;
+
 
       time = (ujiffies + sjiffies) / (double) HZ;
-      memory = rsize * (double) (1 << 8);
+      memory = rss / (double) page_size;
 
       add_process (pid, ppid, time, memory);
+      res++;
     }
   
   if (closedir (dir))
     warning ("failed to close directory '%s'", proc);
+
+  message ("read", "%ld", res);
 
   return res;
 }
@@ -552,6 +556,8 @@ flush_inactive_processes (void)
 	}
     }
 
+  message ("flushed", "%ld", res);
+
   return res;
 }
 
@@ -578,6 +584,7 @@ sample_recursively (Process * p)
     {
       sampled_time += p->time;
       sampled_memory += p->memory;
+      res++;
     }
 
   p->cyclic_sampling = 1;
@@ -606,6 +613,7 @@ sample_all_child_processes (void)
     {
       p = find_process (child_pid);
       sampled = sample_recursively (p);
+      message ("sampled", "%ld", sampled);
     }
   else
     sampled = 0;
@@ -634,7 +642,7 @@ static void
 term_process (Process * p)
 {
   assert (p->pid != parent_pid);
-  printf ("terminate %ld\n", p->pid), fflush (stdout);
+  message ("terminate", "%ld", p->pid);
   kill (p->pid, SIGTERM);
 }
 
@@ -642,7 +650,7 @@ static void
 kill_process (Process * p)
 {
   assert (p->pid != parent_pid);
-  printf ("killing %ld\n", p->pid), fflush (stdout);
+  message ("killing", "%ld", p->pid);
   kill (p->pid, SIGKILL);
 }
 
@@ -676,7 +684,7 @@ static pthread_mutex_t kill_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void
 kill_all_child_processes (void)
 {
-  long ms = 16000;
+  long ms = 160000;
   long rounds = 0;
   Process * p;
   long killed;
@@ -820,7 +828,8 @@ static void (*old_sig_kill_handler);
 static void (*old_sig_term_handler);
 static void (*old_sig_abrt_handler);
 
-static void restore_signal_handlers () {
+static void restore_signal_handlers ()
+{
   (void) signal (SIGINT, old_sig_int_handler);
   (void) signal (SIGSEGV, old_sig_segv_handler);
   (void) signal (SIGKILL, old_sig_kill_handler);
@@ -914,30 +923,7 @@ main (int argc, char **argv)
     error ("maximum process id '%ld' exceeds limit '%ld' (recompile)",
       pid_max, (long) PID_MAX);
 
-#if 0
-  i = 0;
-  message ("1", "%d", i++);
-  message ("12", "%d", i++);
-  message ("123", "%d", i++);
-  message ("1234", "%d", i++);
-  message ("12345", "%d", i++);
-  message ("123456", "%d", i++);
-  message ("1234567", "%d", i++);
-  message ("12345678", "%d", i++);
-  message ("123456789", "%d", i++);
-  message ("1234567890", "%d", i++);
-  message ("12345678901", "%d", i++);
-  message ("123456789012", "%d", i++);
-  message ("1234567890123", "%d", i++);
-  message ("12345678901234", "%d", i++);
-  message ("123456789012345", "%d", i++);
-  message ("1234567890123456", "%d", i++);
-  message ("12345678901234567", "%d", i++);
-  message ("123456789012345678", "%d", i++);
-  message ("1234567890123456789", "%d", i++);
-  message ("12345678901234567890", "%d", i++);
-  exit (1);
-#endif
+  page_size = getpagesize ();
 
   ok = OK;				/* status of the runlim */
   s = 0;				/* signal caught */
@@ -1009,7 +995,7 @@ main (int argc, char **argv)
   message ("space limit", "%u MB", space_limit);
 
   for (j = i; j < argc; j++)
-  message ("argv[%d]", "%s", j - i, argv[j]);
+    message ("argv[%d]", "%s", j - i, argv[j]);
 
   t = time (0);
   message ("start", "%s", ctime (&t));
@@ -1040,7 +1026,6 @@ main (int argc, char **argv)
 
 	  message ("parent pid", "%d", (int) child_pid);
 	  message ("child pid", "%d", (int) parent_pid);
-	  message ("group pid", "%d", (int) group_pid);
 
 	  assert (SAMPLE_RATE < 1000000);
 	  timer.it_interval.tv_sec = 0;

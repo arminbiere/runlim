@@ -24,8 +24,8 @@
 
 /*------------------------------------------------------------------------*/
 
-#ifndef MAX_PROC
-#define MAX_PROC 32768		/* default on most Linux boxes */
+#ifndef PID_MAX			/* usually set by 'configure.sh' */
+#define PID_MAX 32768		/* default on most Linux boxes */
 #endif
 
 /*------------------------------------------------------------------------*/
@@ -58,6 +58,8 @@ struct Process
   double mb;
   long samples;
   Process * next;
+  Process * parent;
+  Process * sibbling;
 };
 
 /*------------------------------------------------------------------------*/
@@ -215,14 +217,20 @@ static int child_pid = -1;
 static int parent_pid = -1;
 static int group_pid = -1;
 
+/*------------------------------------------------------------------------*/
+
 static FILE *log = 0;
 static int close_log = 0;
+
+/*------------------------------------------------------------------------*/
 
 static long num_samples_since_last_report = 0;
 static long num_samples = 0;
 
 static double max_mb = 0;
 static double max_seconds = 0;
+
+/*------------------------------------------------------------------------*/
 
 static int propagate_signals = 0;
 static int children = 0;
@@ -297,6 +305,8 @@ static char * buffer;
 static size_t size_buffer;
 static size_t pos_buffer;
 
+/*------------------------------------------------------------------------*/
+
 static char * path;
 static size_t size_path;
 
@@ -327,6 +337,11 @@ fit_path (size_t len)
 	error ("out-of-memory reallocating path");
     }
 }
+
+/*------------------------------------------------------------------------*/
+
+static long pid_max;
+static Process process[PID_MAX];
 
 /*------------------------------------------------------------------------*/
 
@@ -687,23 +702,53 @@ sig_other_handler (int s)
 
 /*------------------------------------------------------------------------*/
 
-static const char * get_host_name ()
+static const char *
+get_host_name ()
 {
   const char * path = "/proc/sys/kernel/hostname";
   FILE * file;
   int ch;
+
   file = fopen (path, "r");
   if (!file)
-    error ("can not read host name from '%s'", path);
+    error ("can not open '%s' for reading", path);
 
   pos_buffer = 0;
   while ((ch = getc (file)) != EOF)
     push_buffer (ch);
 
-  fclose (file);
   push_buffer (0);
 
+  if (fclose (file))
+    warning ("failed to close file '%s'", path);
+
   return buffer;
+}
+
+static long
+get_pid_max ()
+{
+  const char * path = "/proc/sys/kernel/hostname";
+  FILE * file;
+  long res;
+
+  file = fopen (path, "r");
+  if (!file)
+    error ("can not open '%s' for reading", path);
+
+  if (fscanf (file, "%ld", &res) != 1)
+    error ("failed to read maximum process id from '%s'", path);
+
+  if (res < 32768)
+    error ("tiny maximum process id '%ld' in '%s'", res, path);
+
+  if (res > (1l << 22))
+    error ("huge maximum process id '%ld' in '%s'", res, path);
+
+  if (fclose (file))
+    warning ("failed to close file '%s'", path);
+
+  return res;
 }
 
 /*------------------------------------------------------------------------*/
@@ -712,12 +757,18 @@ int
 main (int argc, char **argv)
 {
   int i, j, res, status, s, ok;
+  char signal_description[80];
+  const char * description;
   struct rlimit l;
   double real;
   time_t t;
 
   log = stderr;
   assert (!close_log);
+
+  pid_max = get_pid_max ();
+  if (pid_max > PID_MAX)
+    error ("maximum process id '%ld' too large (recompile)", pid_max)
 
 #if 0
   i = 0;
@@ -807,18 +858,17 @@ main (int argc, char **argv)
   if (i >= argc)
     error ("no program specified (try '-h')");
 
-  fprintf (log, "[runlim] version:\t\t%g\n", VERSION);
-  fprintf (log, "[runlim] host:\t\t\t%s", get_host_name ());
-  fprintf (log, "[runlim] time limit:\t\t%u seconds\n", time_limit);
-  fprintf (log, "[runlim] real time limit:\t%u seconds\n", real_time_limit);
-  fprintf (log, "[runlim] space limit:\t\t%u MB\n", space_limit);
+  message ("version", "%g", VERSION);
+  message ("host", "%s", get_host_name ());
+  message ("time limit", "%u seconds", time_limit);
+  message ("real time limit", "%u seconds", real_time_limit);
+  message ("space limit", "%u MB", space_limit);
 
   for (j = i; j < argc; j++)
-    fprintf (log, "[runlim] argv[%d]:\t\t%s\n", j - i, argv[j]);
+  message ("argv[%d]", "%s", j - i, argv[j]);
 
   t = time (0);
-  fprintf (log, "[runlim] start:\t\t\t%s", ctime (&t));
-  fflush (log);
+  message ("start", "%s", ctime (&t));
 
   (void) signal (SIGUSR1, sig_usr1_handler);
 
@@ -843,10 +893,9 @@ main (int argc, char **argv)
 	  old_sig_kill_handler = signal (SIGKILL, sig_other_handler);
 	  old_sig_term_handler = signal (SIGTERM, sig_other_handler);
 
-	  fprintf (log, "[runlim] parent pid:\t\t%d\n", (int) child_pid);
-	  fprintf (log, "[runlim] child pid:\t\t%d\n", (int) parent_pid);
-	  fprintf (log, "[runlim] group pid:\t\t%d\n", (int) group_pid);
-	  fflush (log);
+	  message ("parent pid", "%d", (int) child_pid);
+	  message ("child pid", "%d", (int) parent_pid);
+	  message ("group pid", "%d", (int) group_pid);
 
 	  assert (SAMPLE_RATE < 1000000);
 	  timer.it_interval.tv_sec = 0;
@@ -920,8 +969,7 @@ main (int argc, char **argv)
   kill_all_child_processes ();
 
   t = time (0);
-  fprintf (log, "[runlim] end:\t\t\t%s", ctime (&t));
-  fprintf (log, "[runlim] status:\t\t");
+  message ("end", "%s", ctime (&t));
 
   if (max_seconds >= time_limit || real_time () >= real_time_limit)
     goto FORCE_OUT_OF_TIME_ENTRY;
@@ -929,54 +977,53 @@ main (int argc, char **argv)
   switch (ok)
     {
     case OK:
-      fputs ("ok", log);
+      description = "ok";
       res = 0;
       break;
     case OUT_OF_TIME:
 FORCE_OUT_OF_TIME_ENTRY:
-      fputs ("out of time", log);
+      description = "out of time";
       res = 2;
       break;
     case OUT_OF_MEMORY:
-      fputs ("out of memory", log);
+      description = "out of memory";
       res = 3;
       break;
     case SEGMENTATION_FAULT:
-      fputs ("segmentation fault", log);
+      description = "segmentation fault";
       res = 4;
       break;
     case BUS_ERROR:
-      fputs ("bus error", log);
+      description = "bus error";
       res = 5;
       break;
     case FORK_FAILED:
-      fputs ("fork failed", log);
+      description = "fork failed";
       res = 6;
       break;
     case INTERNAL_ERROR:
-      fputs ("internal error", log);
+      description = "internal error";
       res = 7;
       break;
     case EXEC_FAILED:
-      fputs ("execvp failed", log);
+      description = "execvp failed";
       res = 1;
       break;
     default:
-      fprintf (log, "signal(%d)", s);
+      sprintf (signal_description, "signal(%d)", s);
+      description = signal_description;
       res = 11;
       break;
     }
-  fputc ('\n', log);
-  fprintf (log, "[runlim] result:\t\t%d\n", res);
-  fflush (log);
 
-  fprintf (log, "[runlim] children:\t\t%d\n", children);
-  fprintf (log, "[runlim] real:\t\t\t%.2f seconds\n", real);
-  fprintf (log, "[runlim] time:\t\t\t%.2f seconds\n", max_seconds);
-  fprintf (log, "[runlim] space:\t\t\t%.1f MB\n", max_mb);
-  fprintf (log, "[runlim] samples:\t\t%ld\n", num_samples);
+  message ("status", description);
+  message ("result", "%d", res);
+  message ("children", "%d", children);
+  message ("real", "%.2f seconds", real);
+  message ("time", "%.2f seconds", max_seconds);
+  message ("space", "%.1f MB", max_mb);
+  message ("samples", "%ld", num_samples);
 
-  fflush (log);
   if (close_log) fclose (log);
 
   if (buffer) free (buffer);

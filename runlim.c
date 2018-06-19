@@ -472,8 +472,8 @@ NEXT:
       if (sjiffies < 0) goto NEXT;
       if (rsize < 0) goto NEXT;
 
-      time += (ujiffies + sjiffies) / (double) HZ;
-      memory += rsize * (double) (1 << 8);
+      time = (ujiffies + sjiffies) / (double) HZ;
+      memory = rsize * (double) (1 << 8);
 
       add_process (pid, ppid, time, memory);
     }
@@ -818,12 +818,14 @@ static void (*old_sig_int_handler);
 static void (*old_sig_segv_handler);
 static void (*old_sig_kill_handler);
 static void (*old_sig_term_handler);
+static void (*old_sig_abrt_handler);
 
 static void restore_signal_handlers () {
   (void) signal (SIGINT, old_sig_int_handler);
   (void) signal (SIGSEGV, old_sig_segv_handler);
   (void) signal (SIGKILL, old_sig_kill_handler);
   (void) signal (SIGTERM, old_sig_term_handler);
+  (void) signal (SIGABRT, old_sig_abrt_handler);
 }
 
 static void
@@ -869,7 +871,7 @@ get_host_name ()
 static long
 get_pid_max ()
 {
-  const char * path = "/proc/sys/kernel/hostname";
+  const char * path = "/proc/sys/kernel/pid_max";
   FILE * file;
   long res;
 
@@ -1034,6 +1036,7 @@ main (int argc, char **argv)
 	  old_sig_segv_handler = signal (SIGSEGV, sig_other_handler);
 	  old_sig_kill_handler = signal (SIGKILL, sig_other_handler);
 	  old_sig_term_handler = signal (SIGTERM, sig_other_handler);
+	  old_sig_abrt_handler = signal (SIGABRT, sig_other_handler);
 
 	  message ("parent pid", "%d", (int) child_pid);
 	  message ("child pid", "%d", (int) parent_pid);

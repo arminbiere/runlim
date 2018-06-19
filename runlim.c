@@ -52,6 +52,7 @@ enum Status
 
 struct Process
 {
+  char new;
   char active;
   char cyclic_sampling;
   char cyclic_killing;
@@ -177,6 +178,7 @@ isposnumber (const char *str)
 static unsigned
 parse_number_argument (int *i, int argc, char **argv)
 {
+  char ch = argv[*i][1];
   unsigned res;
 
   if (argv[*i][2])
@@ -194,7 +196,7 @@ parse_number_argument (int *i, int argc, char **argv)
   else
     {
 ARGUMENT_IS_MISSING:
-      error ("number argument for '-%c' missing");
+      error ("number argument for '-%c' missing", ch);
       res = 0;
     }
 
@@ -251,7 +253,7 @@ parse_number_rhs (char *str)
 /*------------------------------------------------------------------------*/
 
 static unsigned
-get_physical_mb ()
+get_physical_memory ()
 {
   unsigned res;
   long tmp;
@@ -358,6 +360,7 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
   
   if (p->active)
     {
+      p->new = 0;
       assert (p->pid == pid);
       p->time = time;
       if (p->memory < memory)
@@ -365,7 +368,7 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
     }
   else
     {
-      assert (!p->active);
+      p->new = 1;
       p->active = 1;
       p->pid = pid;
       p->ppid = ppid;
@@ -476,8 +479,6 @@ NEXT:
   
   (void) closedir (dir);
 
-  message ("read", "%ld", res);
-
   return res;
 }
 
@@ -549,8 +550,6 @@ flush_inactive_processes (void)
 	}
     }
 
-  message ("flushed", "%ld", res);
-
   return res;
 }
 
@@ -575,6 +574,7 @@ sample_recursively (Process * p)
 
   if (p->sampled == num_samples)
     {
+      if (p->new) children++;
       sampled_time += p->time;
       sampled_memory += p->memory;
       res++;
@@ -606,7 +606,6 @@ sample_all_child_processes (void)
     {
       p = find_process (child_pid);
       sampled = sample_recursively (p);
-      message ("sampled", "%ld", sampled);
     }
   else
     sampled = 0;
@@ -672,7 +671,7 @@ static pthread_mutex_t kill_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void
 kill_all_child_processes (void)
 {
-  long ms = 160000;
+  long ms = 8000;
   long rounds = 0;
   Process * p;
   long killed;
@@ -680,10 +679,8 @@ kill_all_child_processes (void)
 
   static void (*killer) (Process *);
 
-  do 
+  for (;;)
     {
-      usleep (ms);
-
       if (ms > 2000) killer = term_process;
       else killer = kill_process;
 
@@ -696,16 +693,21 @@ kill_all_child_processes (void)
 	{
 	  connect_process_tree ();
 	  p = find_process (child_pid);
-	  killed = kill_recursively (p, killer);
+	  if (p->active)
+	    killed = kill_recursively (p, killer);
+	  else killed = 0;
 	}
       else killed = 0;
 
       pthread_mutex_unlock (&active_mutex);
       pthread_mutex_unlock (&kill_mutex);
 
+      if (!killed) break;
+      if (rounds++ > 10) break;
+
+      usleep (ms);
       if (ms > 1000) ms /= 2;
     }
-  while (killed > 0 && rounds++ < 10);
 }
 
 /*------------------------------------------------------------------------*/
@@ -737,9 +739,11 @@ real_time (void)
 /*------------------------------------------------------------------------*/
 
 static void
-report (double time, double mb)
+report (double time, double memory)
 {
-  message ("sample", "%.1f time, %1.f real, %.1f MB");
+  double real = real_time ();
+  message ("sample",
+    "%.1f time, %.1f real, %.1f MB", time, real, memory);
 }
 
 /*------------------------------------------------------------------------*/
@@ -931,7 +935,7 @@ main (int argc, char **argv)
 
   time_limit = 60 * 60 * 24 * 3600;	/* one year */
   real_time_limit = time_limit;		/* same as time limit by default */
-  space_limit = get_physical_mb ();	/* physical memory size */
+  space_limit = get_physical_memory ();	/* physical memory size */
 
   for (i = 1; i < argc; i++)
     {
@@ -1029,8 +1033,8 @@ main (int argc, char **argv)
 	  old_sig_term_handler = signal (SIGTERM, sig_other_handler);
 	  old_sig_abrt_handler = signal (SIGABRT, sig_other_handler);
 
-	  message ("parent pid", "%d", (int) child_pid);
-	  message ("child pid", "%d", (int) parent_pid);
+	  message ("parent", "%d", (int) child_pid);
+	  message ("child", "%d", (int) parent_pid);
 
 	  assert (SAMPLE_RATE < 1000000);
 	  timer.it_interval.tv_sec = 0;

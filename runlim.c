@@ -768,7 +768,8 @@ main (int argc, char **argv)
 
   pid_max = get_pid_max ();
   if (pid_max > PID_MAX)
-    error ("maximum process id '%ld' too large (recompile)", pid_max)
+    error ("maximum process id '%ld' exceeds limit '%ld' (recompile)",
+      pid_max, (long) PID_MAX);
 
 #if 0
   i = 0;
@@ -1024,10 +1025,18 @@ FORCE_OUT_OF_TIME_ENTRY:
   message ("space", "%.1f MB", max_mb);
   message ("samples", "%ld", num_samples);
 
-  if (close_log) fclose (log);
+  if (close_log)
+    {
+      log = stderr;
+      if (fclose (log))
+	warning ("could not close log file");
+    }
 
-  if (buffer) free (buffer);
-  if (path) free (path);
+  if (buffer)
+    free (buffer);
+
+  if (path)
+    free (path);
 
   restore_signal_handlers ();
 
@@ -1043,7 +1052,7 @@ FORCE_OUT_OF_TIME_ENTRY:
 	case EXEC_FAILED:
 	  break;
 	default:
-	  kill (parent_pid, s);
+	  raise (s);
 	  break;
 	}
     }

@@ -310,7 +310,7 @@ push_buffer (int ch)
       size_buffer = size_buffer ? 2*size_buffer : 128;
       buffer = realloc (buffer, size_buffer);
       if (!buffer)
-	perror ("buffer");
+	error ("out-of-memory reallocating buffer");
     }
 
   buffer[pos_buffer++] = ch;
@@ -324,7 +324,7 @@ fit_path (size_t len)
       size_path = 2*len;
       path = realloc (path, size_path);
       if (!path)
-	perror ("path");
+	error ("out-of-memory reallocating path");
     }
 }
 
@@ -346,10 +346,7 @@ forall_child_processes (long (*f)(Process*))
   long res = 0;
 
   if (!(dir = opendir (PROC_PATH)))
-    {
-      perror (PROC_PATH);
-      exit (1);
-    }
+    error ("can not open directory '%s'", PROC_PATH);
 
   empty = 1;
 
@@ -424,13 +421,11 @@ SKIP:
       res += f (&p);
     }
   
-  (void) closedir (dir);
+  if (closedir (dir))
+    warning ("failed to close directory '%s'", PROC_PATH);
 
   if (empty)
-    {
-      fprintf (stderr, "%s is empty (not mounted ?)\n", PROC_PATH) ;
-      exit (1);
-    }
+    error ("directory '%s' empty", PROC_PATH);
 
   return res;
 }
@@ -465,7 +460,8 @@ sample_process (Process * p)
   if (!q)
     {
       q = malloc (sizeof *q);
-      if (!q) perror ("process");
+      if (!q)
+	error ("out-of-memory allocating process");
       q->pid = p->pid;
       q->ppid = p->ppid;
       q->next = active;
@@ -590,11 +586,7 @@ real_time (void)
 static void
 report (double time, double mb)
 {
-  double real = real_time ();
-  fprintf (log, 
-     "[runlim] sample:\t\t%.1f time, %.1f real, %.1f MB\n", 
-     time, real, mb);
-  fflush (log);
+  message ("sample", "%.1f time, %1.f real, %.1f MB");
 }
 
 /*------------------------------------------------------------------------*/
@@ -695,14 +687,23 @@ sig_other_handler (int s)
 
 /*------------------------------------------------------------------------*/
 
-static void print_host_name () {
-  FILE * file = fopen ("/proc/sys/kernel/hostname", "r");
-  if (file) {
-    int ch;
-    while ((ch = getc (file)) != '\n' && ch != EOF)
-      fputc (ch, log);
-    fclose (file);
-  } else fputs ("unknown", log);
+static const char * get_host_name ()
+{
+  const char * path = "/proc/sys/kernel/hostname";
+  FILE * file;
+  int ch;
+  file = fopen (path, "r");
+  if (!file)
+    error ("can not read host name from '%s'", path);
+
+  pos_buffer = 0;
+  while ((ch = getc (file)) != EOF)
+    push_buffer (ch);
+
+  fclose (file);
+  push_buffer (0);
+
+  return buffer;
 }
 
 /*------------------------------------------------------------------------*/
@@ -782,6 +783,7 @@ main (int argc, char **argv)
 	           strcmp (argv[i], "--version") == 0)
 	    {
 	      printf ("%g\n", VERSION);
+	      fflush (stdout);
 	      exit (0);
 	    }
 	  else if (strcmp (argv[i], "-k") == 0 ||
@@ -796,27 +798,17 @@ main (int argc, char **argv)
 	      exit (0);
 	    }
 	  else
-	    {
-	      fprintf (stderr, "*** runlim: invalid option '%s' (try '-h')\n",
-		       argv[i]);
-	      exit (1);
-	    }
+	    error ("invalid option '%s' (try '-h')", argv[1]);
 	}
       else
 	break;
     }
 
   if (i >= argc)
-    {
-      fprintf (stderr, "*** runlim: no program specified (try '-h')\n");
-      exit (1);
-    }
+    error ("no program specified (try '-h')");
 
   fprintf (log, "[runlim] version:\t\t%g\n", VERSION);
-  fprintf (log, "[runlim] host:\t\t\t");
-  print_host_name ();
-  fputc ('\n', log);
-
+  fprintf (log, "[runlim] host:\t\t\t%s", get_host_name ());
   fprintf (log, "[runlim] time limit:\t\t%u seconds\n", time_limit);
   fprintf (log, "[runlim] real time limit:\t%u seconds\n", real_time_limit);
   fprintf (log, "[runlim] space limit:\t\t%u MB\n", space_limit);

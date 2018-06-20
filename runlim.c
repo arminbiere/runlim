@@ -272,17 +272,120 @@ parse_number_rhs (char *str)
 
 /*------------------------------------------------------------------------*/
 
-static unsigned
-get_physical_memory ()
-{
-  unsigned res;
-  long tmp;
+static char * buffer;
+static size_t size_buffer;
+static size_t pos_buffer;
 
-  tmp = sysconf (_SC_PAGE_SIZE) * sysconf (_SC_PHYS_PAGES);
-  tmp >>= 20;
-  res = (unsigned) tmp;
+/*------------------------------------------------------------------------*/
+
+static void
+push_buffer (int ch)
+{
+  if (size_buffer == pos_buffer)
+    {
+      size_buffer = size_buffer ? 2*size_buffer : 128;
+      buffer = realloc (buffer, size_buffer);
+      if (!buffer)
+	error ("out-of-memory reallocating buffer");
+    }
+
+  buffer[pos_buffer++] = ch;
+}
+
+/*------------------------------------------------------------------------*/
+
+static const char *
+read_host_name ()
+{
+  const char * path = "/proc/sys/kernel/hostname";
+  FILE * file;
+  int ch;
+
+  file = fopen (path, "r");
+  if (!file)
+    error ("can not open '%s' for reading", path);
+
+  pos_buffer = 0;
+  while ((ch = getc_unlocked (file)) != EOF && ch != '\n')
+    push_buffer (ch);
+
+  push_buffer (0);
+
+  (void) fclose (file);
+
+  return buffer;
+}
+
+static long
+read_pid_max ()
+{
+  const char * path = "/proc/sys/kernel/pid_max";
+  FILE * file;
+  long res;
+
+  file = fopen (path, "r");
+  if (!file)
+    error ("can not open '%s' for reading", path);
+
+  if (fscanf (file, "%ld", &res) != 1)
+    error ("failed to read maximum process id from '%s'", path);
+
+  if (res < 32768)
+    error ("tiny maximum process id '%ld' in '%s'", res, path);
+
+  if (res > (1l << 22))
+    error ("huge maximum process id '%ld' in '%s'", res, path);
+
+  if (fclose (file))
+    warning ("failed to close file '%s'", path);
 
   return res;
+}
+
+/*------------------------------------------------------------------------*/
+
+static long pid_max;
+static long page_size;
+static long clock_ticks;
+
+static double memory_per_page;
+static double physical_memory;
+
+static void
+get_pid_max ()
+{
+  pid_max = read_pid_max ();
+  if (pid_max <= PID_MAX) return;
+  error ("maximum process id '%ld' exceeds limit '%ld' (recompile)",
+    pid_max, (long) PID_MAX);
+}
+
+static void
+get_page_size ()
+{
+  page_size = (long) sysconf (_SC_PAGE_SIZE);
+  if (page_size <= 0) page_size = 4096;
+  memory_per_page = page_size / (double)(1<<20);
+  message ("page size", "%ld bytes", page_size);
+  message ("memory per page", "%g MB", memory_per_page);
+}
+
+static void
+get_physical_memory ()
+{
+  long tmp;
+  assert (page_size > 0);
+  tmp = page_size * sysconf (_SC_PHYS_PAGES);
+  physical_memory = tmp / (double)(1<<20);
+  message ("physical memory", "%.0f MB", physical_memory);
+}
+
+static void
+get_clock_ticks ()
+{
+  clock_ticks = sysconf (_SC_CLK_TCK);
+  if (!clock_ticks) clock_ticks = HZ;		// FIXME
+  message ("clock ticks", "%ld", clock_ticks);
 }
 
 /*------------------------------------------------------------------------*/
@@ -307,13 +410,13 @@ static int children = 0;
 
 /* see 'man 5 proc' for explanation of these fields */
 
-#define PID_POS 0
-#define CMM_POS 1
+#define PID_POS 1
+#define CMM_POS 2
 #define PPID_POS 3
-#define STIME_POS 13
 #define UTIME_POS 14
-#define RSS_POS 23
-#define MAX_POS 23
+#define STIME_POS 15
+#define RSS_POS 24
+#define MAX_POS 24
 
 /*------------------------------------------------------------------------*/
 
@@ -324,30 +427,8 @@ static double space_limit;
 
 /*------------------------------------------------------------------------*/
 
-static char * buffer;
-static size_t size_buffer;
-static size_t pos_buffer;
-
-/*------------------------------------------------------------------------*/
-
 static char * path;
 static size_t size_path;
-
-/*------------------------------------------------------------------------*/
-
-static void
-push_buffer (int ch)
-{
-  if (size_buffer == pos_buffer)
-    {
-      size_buffer = size_buffer ? 2*size_buffer : 128;
-      buffer = realloc (buffer, size_buffer);
-      if (!buffer)
-	error ("out-of-memory reallocating buffer");
-    }
-
-  buffer[pos_buffer++] = ch;
-}
 
 static void
 fit_path (size_t len)
@@ -363,8 +444,6 @@ fit_path (size_t len)
 
 /*------------------------------------------------------------------------*/
 
-static long pid_max;
-static long page_size;
 static Process process[PID_MAX];
 static Process * active;
 
@@ -412,9 +491,9 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
 static long
 read_processes (void)
 {
-  long utime, stime, rss;
   const char * proc = "/proc";
   char *token, *after_cmm;
+  long utime, stime, rss;
   long pid, ppid, tmp;
   double time, memory;
   struct dirent *de;
@@ -463,7 +542,7 @@ NEXT_PROCESS:
       token = strtok (buffer, " ");
       if (!token) goto NEXT_PROCESS;
 
-      i = 0;
+      i = 1;		/* count as in man page 'man 5 proc' */
       
       while (i <= MAX_POS)
 	{
@@ -505,8 +584,8 @@ NEXT_PROCESS:
 	  if (!token) goto NEXT_PROCESS;
 	}
 
-      time = (utime + stime) / (double) HZ;
-      memory = rss / (double) page_size;
+      time = (utime + stime) / clock_ticks;
+      memory = rss * memory_per_page;
 
       add_process (pid, ppid, time, memory);
       res++;
@@ -882,56 +961,6 @@ sig_other_handler (int s)
 /*------------------------------------------------------------------------*/
 
 static const char *
-get_host_name ()
-{
-  const char * path = "/proc/sys/kernel/hostname";
-  FILE * file;
-  int ch;
-
-  file = fopen (path, "r");
-  if (!file)
-    error ("can not open '%s' for reading", path);
-
-  pos_buffer = 0;
-  while ((ch = getc_unlocked (file)) != EOF && ch != '\n')
-    push_buffer (ch);
-
-  push_buffer (0);
-
-  (void) fclose (file);
-
-  return buffer;
-}
-
-static long
-get_pid_max ()
-{
-  const char * path = "/proc/sys/kernel/pid_max";
-  FILE * file;
-  long res;
-
-  file = fopen (path, "r");
-  if (!file)
-    error ("can not open '%s' for reading", path);
-
-  if (fscanf (file, "%ld", &res) != 1)
-    error ("failed to read maximum process id from '%s'", path);
-
-  if (res < 32768)
-    error ("tiny maximum process id '%ld' in '%s'", res, path);
-
-  if (res > (1l << 22))
-    error ("huge maximum process id '%ld' in '%s'", res, path);
-
-  if (fclose (file))
-    warning ("failed to close file '%s'", path);
-
-  return res;
-}
-
-/*------------------------------------------------------------------------*/
-
-static const char *
 ctime_without_new_line (time_t * t)
 {
   const char * str, * p;
@@ -1010,19 +1039,17 @@ main (int argc, char **argv)
 	break;
     }
 
-  pid_max = get_pid_max ();
-  if (pid_max > PID_MAX)
-    error ("maximum process id '%ld' exceeds limit '%ld' (recompile)",
-      pid_max, (long) PID_MAX);
-
-  page_size = getpagesize ();
+  get_pid_max ();
+  get_page_size ();
+  get_physical_memory ();
+  get_clock_ticks ();
 
   ok = OK;				/* status of the runlim */
   s = 0;				/* signal caught */
 
   time_limit = 60 * 60 * 24 * 3600;	/* one year */
   real_time_limit = time_limit;		/* same as time limit by default */
-  space_limit = get_physical_memory ();	/* physical memory size */
+  space_limit = physical_memory;
 
   for (i = 1; i < argc; i++)
     {
@@ -1103,10 +1130,10 @@ main (int argc, char **argv)
     error ("no program specified (try '-h')");
 
   message ("version", "%g", VERSION);
-  message ("host", "%s", get_host_name ());
-  message ("time limit", "%u seconds", time_limit);
-  message ("real time limit", "%u seconds", real_time_limit);
-  message ("space limit", "%u MB", space_limit);
+  message ("host", "%s", read_host_name ());
+  message ("time limit", "%.0f seconds", time_limit);
+  message ("real time limit", "%.0f seconds", real_time_limit);
+  message ("space limit", "%.0f MB", space_limit);
 
   for (j = i; j < argc; j++)
     {

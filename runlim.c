@@ -82,33 +82,33 @@ struct Process
 #define USAGE \
 "usage: runlim [option ...] program [arg ...]\n" \
 "\n" \
-"  where option is from the following list:\n" \
+"where option is from the following list:\n" \
 "\n" \
-"    -h                         print this command line summary\n" \
-"    --help\n" \
+"  -h                         print this command line summary\n" \
+"  --help\n" \
 "\n" \
-"    --version                  print version number\n" \
+"  --version                  print version number\n" \
 "\n" \
-"    --output-file=<file>       output file (default '<stderr>')\n" \
-"    -o <file>\n" \
+"  --output-file=<file>       output file (default '<stderr>')\n" \
+"  -o <file>\n" \
 "\n" \
-"    --space-limit=<number>     set space limit to <number> MB\n" \
-"    -s <number>\n"\
+"  --space-limit=<number>     set space limit to <number> MB\n" \
+"  -s <number>\n"\
 "\n" \
-"    --time-limit=<number>      set time limit to <number> seconds\n" \
-"    -t <number>\n"\
+"  --time-limit=<number>      set time limit to <number> seconds\n" \
+"  -t <number>\n"\
 "\n" \
-"    --real-time-limit=<number> set real time limit to <number> seconds\n" \
-"    -r <number>\n"\
+"  --real-time-limit=<number> set real time limit to <number> seconds\n" \
+"  -r <number>\n"\
 "\n" \
-"    --sample-rate=<number>     sample rate in milliseconds " \
+"  --sample-rate=<number>     sample rate in milliseconds " \
 "(default %ld)\n" \
 "\n" \
-"    --report-rate=<number>     report rate in terms of sampling " \
+"  --report-rate=<number>     report rate in terms of sampling " \
 "(default %ld)\n" \
 "\n" \
-"    --kill                     propagate signals\n" \
-"    -k\n" \
+"  --kill                     propagate signals\n" \
+"  -k\n" \
 "\n" \
 "The program is the name of an executable followed by its arguments.\n"
 

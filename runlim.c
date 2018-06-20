@@ -1,3 +1,13 @@
+/*------------------------------------------------------------------------*\
+
+Copyright (c) 2000-2004 Armin Biere, ETH Zurich.
+Copyright (c) 2005-2018 Armin Biere, Johannes Kepler University.
+Copyright (c) 2007 Toni Jussila, Johannes Kepler University.
+
+See LICENSE for restrictions on using this software.
+
+\*------------------------------------------------------------------------*/
+
 #include <asm/param.h>
 #include <assert.h>
 #include <ctype.h>
@@ -19,8 +29,8 @@
 
 /*------------------------------------------------------------------------*/
 
-#define SAMPLE_RATE 100000	/* in milliseconds */
-#define REPORT_RATE 100		/* in terms of sampling */
+#define SAMPLE_RATE 100000l	/* in milliseconds */
+#define REPORT_RATE 100l	/* in terms of sampling */
 
 /*------------------------------------------------------------------------*/
 
@@ -79,8 +89,8 @@ struct Process
 "\n" \
 "    --version                  print version number\n" \
 "\n" \
-"    -o <file>                  output file (default '<stderr>')" \
-"    --output-file=<file>\n" \
+"    --output-file=<file>       output file (default '<stderr>')\n" \
+"    -o <file>\n" \
 "\n" \
 "    --space-limit=<number>     set space limit to <number> MB\n" \
 "    -s <number>\n"\
@@ -91,7 +101,14 @@ struct Process
 "    --real-time-limit=<number> set real time limit to <number> seconds\n" \
 "    -r <number>\n"\
 "\n" \
-"    -k|--kill                  propagate signals\n" \
+"    --sample-rate=<number>     sample rate in milliseconds " \
+"(default %ld)\n" \
+"\n" \
+"    --report-rate=<number>     report rate in terms of sampling " \
+"(default %ld)\n" \
+"\n" \
+"    --kill                     propagate signals\n" \
+"    -k\n" \
 "\n" \
 "The program is the name of an executable followed by its arguments.\n"
 
@@ -105,7 +122,7 @@ static int close_log = 0;
 static void
 usage (void)
 {
-  fprintf (log, USAGE);
+  fprintf (log, USAGE, SAMPLE_RATE, REPORT_RATE);
   fflush (log);
 }
 
@@ -178,22 +195,22 @@ isposnumber (const char *str)
 
 /*------------------------------------------------------------------------*/
 
-static unsigned
+static long
 parse_number_argument (int *i, int argc, char **argv)
 {
   char ch = argv[*i][1];
-  unsigned res;
+  long res;
 
   if (argv[*i][2])
     {
       if (isposnumber (argv[*i] + 2))
-	res = (unsigned) atoi (argv[*i] + 2);
+	res = atol (argv[*i] + 2);
       else
 	goto ARGUMENT_IS_MISSING;
     }
   else if (*i + 1 < argc && isposnumber (argv[*i + 1]))
     {
-      res = (unsigned) atoi (argv[*i + 1]);
+      res = atol (argv[*i + 1]);
       *i += 1;
     }
   else
@@ -300,10 +317,10 @@ static int children = 0;
 
 /*------------------------------------------------------------------------*/
 
-static unsigned start_time;
-static unsigned time_limit;
-static unsigned real_time_limit;
-static unsigned space_limit;
+static double start_time;
+static double time_limit;
+static double real_time_limit;
+static double space_limit;
 
 /*------------------------------------------------------------------------*/
 
@@ -757,6 +774,9 @@ report (double time, double memory)
 
 /*------------------------------------------------------------------------*/
 
+static long sample_rate = SAMPLE_RATE;
+static long report_rate = REPORT_RATE;
+
 static void
 sampler (int s)
 {
@@ -785,7 +805,7 @@ sampler (int s)
 	max_time = sampled_time;
     }
 
-  if (++num_samples_since_last_report >= REPORT_RATE)
+  if (++num_samples_since_last_report >= report_rate)
     {
       num_samples_since_last_report = 0;
       if (sampled > 0)
@@ -1042,6 +1062,18 @@ main (int argc, char **argv)
 	    {
 	      space_limit = parse_number_rhs (argv[i]);
 	    }
+	  else if (strstr (argv[i], "--sample-rate=") == argv[i])
+	    {
+	      sample_rate = parse_number_rhs (argv[i]);
+	      if (sample_rate <= 0)
+		error ("invalid sample rate '%ld'", sample_rate);
+	    }
+	  else if (strstr (argv[i], "--report-rate=") == argv[i])
+	    {
+	      report_rate = parse_number_rhs (argv[i]);
+	      if (report_rate <= 0)
+		error ("invalid report rate '%ld'", report_rate);
+	    }
 	  else if (strcmp (argv[i], "-v") == 0 ||
 	           strcmp (argv[i], "--version") == 0)
 	    {
@@ -1113,9 +1145,8 @@ main (int argc, char **argv)
 	  message ("parent", "%d", (int) child_pid);
 	  message ("child", "%d", (int) parent_pid);
 
-	  assert (SAMPLE_RATE < 1000000);
-	  timer.it_interval.tv_sec = 0;
-	  timer.it_interval.tv_usec = SAMPLE_RATE;
+	  timer.it_interval.tv_sec  = sample_rate / 1000000;
+	  timer.it_interval.tv_usec = sample_rate % 1000000;
 	  timer.it_value = timer.it_interval;
 
 	  signal (SIGALRM, sampler);

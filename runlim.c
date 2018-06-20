@@ -285,11 +285,14 @@ static int children = 0;
 
 /*------------------------------------------------------------------------*/
 
+/* see 'man 5 proc' for explanation of these fields */
+
 #define PID_POS 0
+#define CMM_POS 1
 #define PPID_POS 3
 #define STIME_POS 13
 #define UTIME_POS 14
-#define RSIZE_POS 23
+#define RSS_POS 23
 #define MAX_POS 23
 
 /*------------------------------------------------------------------------*/
@@ -389,12 +392,12 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
 static long
 read_processes (void)
 {
-  long ujiffies, sjiffies, rss;
+  long utime, stime, rss;
   const char * proc = "/proc";
-  long pid, ppid, tmpid;
+  char *token, *after_cmm;
+  long pid, ppid, tmp;
   double time, memory;
   struct dirent *de;
-  char *token;
   FILE *file;
   int i, ch;
   DIR *dir;
@@ -404,75 +407,85 @@ read_processes (void)
   if (!(dir = opendir (proc)))
     error ("can not open directory '%s'", proc);
 
-NEXT:
+NEXT_PROCESS:
 
   while ((de = readdir (dir)) != NULL)
     {
       pid = (pid_t) atoi (de->d_name);
-      if (pid == 0) goto NEXT;
-      if (pid >= pid_max) goto NEXT;
+      if (pid == 0) goto NEXT_PROCESS;
+      if (pid >= pid_max) goto NEXT_PROCESS;
 
       fit_path (strlen (proc) + strlen (de->d_name) + 20);
       sprintf (path, "%s/%ld/stat", proc, pid);
       file = fopen (path, "r");
-      if (!file) goto NEXT;
+      if (!file) goto NEXT_PROCESS;
 
       pos_buffer = 0;
       
-      while ((ch = getc (file)) != EOF)
+      while ((ch = getc_unlocked (file)) != EOF)
 	push_buffer (ch);
       
       (void) fclose (file);	/* ignore return value */
 
       push_buffer (0);
       
-      ppid = -1;
-      tmpid = -1;
-      rss = -1;
-      ujiffies = -1;
-      sjiffies = -1;
+      if (!strchr (buffer, '(')) goto NEXT_PROCESS;
+      if (!(after_cmm = strrchr (buffer, ')'))) goto NEXT_PROCESS;
+      assert (*after_cmm == ')');
+      if (*++after_cmm != ' ') goto NEXT_PROCESS;
+      after_cmm++;
       
+      ppid = -1;
+      rss = -1;
+      utime = -1;
+      stime = -1;
+
       token = strtok (buffer, " ");
+      if (!token) goto NEXT_PROCESS;
+
       i = 0;
       
-      while (token && i <= MAX_POS)
+      while (i <= MAX_POS)
 	{
 	  switch (i++)
 	    {
 	    case PID_POS:
-	      if (sscanf (token, "%ld", &tmpid) != 1) goto NEXT;
-	      if (tmpid != pid) goto NEXT;
+	      if (sscanf (token, "%ld", &tmp) != 1) goto NEXT_PROCESS;
+	      if (tmp != pid) goto NEXT_PROCESS;
 	      break;
 	    case PPID_POS:
-	      if (sscanf (token, "%ld", &ppid) != 1) goto NEXT;
-	      if (ppid < 0) goto NEXT;
-	      if (ppid >= pid_max) goto NEXT;
+	      if (sscanf (token, "%ld", &ppid) != 1) goto NEXT_PROCESS;
+	      if (ppid < 0) goto NEXT_PROCESS;
+	      if (ppid >= pid_max) goto NEXT_PROCESS;
 	      break;
-	    case RSIZE_POS:
-	       if (sscanf (token, "%ld", &rss) != 1) goto NEXT;
-	       break;
 	    case STIME_POS:
-	      if (sscanf (token, "%ld", &sjiffies) != 1) goto NEXT;
+	      if (sscanf (token, "%ld", &stime) != 1) goto NEXT_PROCESS;
+	      if (stime < 0) goto NEXT_PROCESS;
 	      break;
 	    case UTIME_POS:
-	      if (sscanf (token, "%ld", &ujiffies) != 1) goto NEXT;
+	      if (sscanf (token, "%ld", &utime) != 1) goto NEXT_PROCESS;
+	      if (utime < 0) goto NEXT_PROCESS;
+	      break;
+	    case RSS_POS:
+	      if (sscanf (token, "%ld", &rss) != 1) goto NEXT_PROCESS;
+	      if (rss < 0) goto NEXT_PROCESS;
 	      break;
 	    default:
 	      break;
 	    }
-	  
-	  token = strtok (0, " ");
+
+	  if (i == CMM_POS)
+	    {
+	      token = strtok (after_cmm, " ");
+	      i++;
+	    }
+	  else
+	    token = strtok (0, " ");
+
+	  if (!token) goto NEXT_PROCESS;
 	}
 
-      if (tmpid < 0) goto NEXT;
-      assert (tmpid == pid);
-      if (ppid < 0) goto NEXT;
-      if (ujiffies < 0) goto NEXT;
-      if (sjiffies < 0) goto NEXT;
-      if (rss < 0) goto NEXT;
-
-
-      time = (ujiffies + sjiffies) / (double) HZ;
+      time = (utime + stime) / (double) HZ;
       memory = rss / (double) page_size;
 
       add_process (pid, ppid, time, memory);
@@ -857,7 +870,7 @@ get_host_name ()
     error ("can not open '%s' for reading", path);
 
   pos_buffer = 0;
-  while ((ch = getc (file)) != EOF && ch != '\n')
+  while ((ch = getc_unlocked (file)) != EOF && ch != '\n')
     push_buffer (ch);
 
   push_buffer (0);

@@ -48,8 +48,8 @@ typedef enum Status Status;
 enum Status
 {
   OK,
-  OUT_OF_MEMORY,
   OUT_OF_TIME,
+  OUT_OF_MEMORY,
   SEGMENTATION_FAULT,
   BUS_ERROR,
   OTHER_SIGNAL,
@@ -206,7 +206,7 @@ parse_number_argument (int *i, int argc, char **argv)
       if (isposnumber (argv[*i] + 2))
 	res = atol (argv[*i] + 2);
       else
-	goto ARGUMENT_IS_MISSING;
+        error ("invalid argument in '%s'", argv[*i]);
     }
   else if (*i + 1 < argc && isposnumber (argv[*i + 1]))
     {
@@ -214,58 +214,29 @@ parse_number_argument (int *i, int argc, char **argv)
       *i += 1;
     }
   else
-    {
-ARGUMENT_IS_MISSING:
-      error ("number argument for '-%c' missing", ch);
-      res = 0;
-    }
+    error ("argument missing for '-%c'", ch);
 
   return res;
 }
 
 /*------------------------------------------------------------------------*/
 
-static void
-print_long_command_line_option (FILE * file, char *str)
-{
-  const char *p;
-
-  for (p = str; *p && *p != ' '; p++)
-    fputc (*p, file);
-}
-
-/*------------------------------------------------------------------------*/
-
-static unsigned
+static long
 parse_number_rhs (char *str)
 {
-  unsigned res;
+  long res;
   char *p;
 
   p = strchr (str, '=');
   assert (p);
 
   if (!p[1])
-    {
-      fputs ("*** runlim: argument to ", stderr);
-      print_long_command_line_option (stderr, str);
-      fputs (" is missing\n", stderr);
-      exit (1);
-
-      res = 0;
-    }
+    error ("argument missing in '%s'", str);
 
   if (!isposnumber (p + 1))
-    {
-      fputs ("*** runlim: argument to ", stderr);
-      print_long_command_line_option (stderr, str);
-      fputs (" is not a positive number\n", stderr);
-      exit (1);
+    error ("invalid argument in '%s'", str);
 
-      res = 0;
-    }
-
-  res = (unsigned) atoi (p + 1);
+  res = atol (p + 1);
 
   return res;
 }
@@ -411,8 +382,10 @@ static int children = 0;
 /* see 'man 5 proc' for explanation of these fields */
 
 #define PID_POS 1
-#define CMM_POS 2
-#define PPID_POS 3
+#define COMM_POS 2
+#define PPID_POS 4
+#define PGID_POS 5
+#define SESSION_POS 6
 #define UTIME_POS 14
 #define STIME_POS 15
 #define RSS_POS 24
@@ -467,8 +440,7 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
       p->new = 0;
       assert (p->pid == pid);
       p->time = time;
-      if (p->memory < memory)
-	p->memory = memory;
+      p->memory = memory;
     }
   else
     {
@@ -491,8 +463,8 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
 static long
 read_processes (void)
 {
+  char *token, *comm, *end_of_comm, *after_comm;
   const char * proc = "/proc";
-  char *token, *after_cmm;
   long utime, stime, rss;
   long pid, ppid, tmp;
   double time, memory;
@@ -511,7 +483,7 @@ NEXT_PROCESS:
   while ((de = readdir (dir)) != NULL)
     {
       pid = (pid_t) atoi (de->d_name);
-      if (pid == 0) goto NEXT_PROCESS;
+      if (pid <= 0) goto NEXT_PROCESS;
       if (pid >= pid_max) goto NEXT_PROCESS;
 
       fit_path (strlen (proc) + strlen (de->d_name) + 20);
@@ -520,33 +492,31 @@ NEXT_PROCESS:
       if (!file) goto NEXT_PROCESS;
 
       pos_buffer = 0;
-      
       while ((ch = getc_unlocked (file)) != EOF)
 	push_buffer (ch);
+      push_buffer (0);
       
       (void) fclose (file);	/* ignore return value */
 
-      push_buffer (0);
-      
-      if (!strchr (buffer, '(')) goto NEXT_PROCESS;
-      if (!(after_cmm = strrchr (buffer, ')'))) goto NEXT_PROCESS;
-      assert (*after_cmm == ')');
-      if (*++after_cmm != ' ') goto NEXT_PROCESS;
-      after_cmm++;
+      comm = strchr (buffer, '(');
+      if (!comm++) goto NEXT_PROCESS;
+      end_of_comm = strrchr (comm, ')');
+      if (!end_of_comm) goto NEXT_PROCESS;
+      *end_of_comm = 0;
+      after_comm = end_of_comm + 1;
+      if (*after_comm++ != ' ') goto NEXT_PROCESS;
       
       ppid = -1;
-      rss = -1;
       utime = -1;
       stime = -1;
+      rss = -1;
 
       token = strtok (buffer, " ");
       if (!token) goto NEXT_PROCESS;
 
-      i = 1;		/* count as in man page 'man 5 proc' */
-      
-      while (i <= MAX_POS)
+      for (i = 1; i <= MAX_POS; i++)
 	{
-	  switch (i++)
+	  switch (i)
 	    {
 	    case PID_POS:
 	      if (sscanf (token, "%ld", &tmp) != 1) goto NEXT_PROCESS;
@@ -573,11 +543,10 @@ NEXT_PROCESS:
 	      break;
 	    }
 
-	  if (i == CMM_POS)
-	    {
-	      token = strtok (after_cmm, " ");
-	      i++;
-	    }
+	  if (i + 1 == COMM_POS)
+	    token = comm;
+	  else if (i == COMM_POS)
+	    token = strtok (after_comm, " ");
 	  else
 	    token = strtok (0, " ");
 
@@ -703,29 +672,6 @@ sample_recursively (Process * p)
   p->cyclic_sampling = 0;
   
   return res;
-}
-
-static long
-sample_all_child_processes (void)
-{
-  long read, sampled;
-  Process * p;
-
-  read = read_processes ();
-  connect_process_tree ();
-
-  if (read > 0)
-    {
-      p = find_process (child_pid);
-      sampled = sample_recursively (p);
-    }
-  else
-    sampled = 0;
-
-  sampled += flush_inactive_processes ();
-  sampled_time += accumulated_time;
-
-  return sampled;
 }
 
 /*------------------------------------------------------------------------*/
@@ -857,9 +803,10 @@ static long sample_rate = SAMPLE_RATE;
 static long report_rate = REPORT_RATE;
 
 static void
-sampler (int s)
+sample_all_child_processes (int s)
 {
-  long sampled;
+  long sampled, read;
+  Process * p;
   int ignore;
 
   assert (s == SIGALRM);
@@ -872,8 +819,21 @@ sampler (int s)
 
   num_samples++;
 
+  read = read_processes ();
+  connect_process_tree ();
+
   sampled_time = sampled_memory = 0;
-  sampled = sample_all_child_processes ();
+
+  if (read > 0)
+    {
+      p = find_process (child_pid);
+      sampled = sample_recursively (p);
+    }
+  else
+    sampled = 0;
+
+  sampled += flush_inactive_processes ();
+  sampled_time += accumulated_time;
 
   if (sampled > 0)
     { 
@@ -1176,7 +1136,7 @@ main (int argc, char **argv)
 	  timer.it_interval.tv_usec = sample_rate % 1000000;
 	  timer.it_value = timer.it_interval;
 
-	  signal (SIGALRM, sampler);
+	  signal (SIGALRM, sample_all_child_processes);
 	  setitimer (ITIMER_REAL, &timer, &old_timer);
 
 	  (void) wait (&status);

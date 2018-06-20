@@ -348,7 +348,7 @@ static long page_size;
 static Process process[PID_MAX];
 static Process * active;
 
-static pthread_mutex_t killing_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile int killing;
 
 static void
@@ -685,9 +685,9 @@ kill_all_child_processes (void)
   int ignore;
   long read;
 
-  pthread_mutex_lock (&killing_mutex);
+  pthread_mutex_lock (&mutex);
   if (!(ignore = killing)) killing = 1;
-  pthread_mutex_unlock (&killing_mutex);
+  pthread_mutex_unlock (&mutex);
   if (ignore) return;
 
   static void (*killer) (Process *);
@@ -762,9 +762,9 @@ sampler (int s)
 
   assert (s == SIGALRM);
 
-  pthread_mutex_lock (&killing_mutex);
+  pthread_mutex_lock (&mutex);
   ignore = killing;
-  pthread_mutex_unlock (&killing_mutex);
+  pthread_mutex_unlock (&mutex);
   
   if (ignore) return;
 

@@ -79,6 +79,9 @@ struct Process
 "\n" \
 "    --version                  print version number\n" \
 "\n" \
+"    -o <file>                  output file (default '<stderr>')" \
+"    --output-file=<file>\n" \
+"\n" \
 "    --space-limit=<number>     set space limit to <number> MB\n" \
 "    -s <number>\n"\
 "\n" \
@@ -94,17 +97,17 @@ struct Process
 
 /*------------------------------------------------------------------------*/
 
-static void
-usage (void)
-{
-  printf (USAGE);
-  fflush (stdout);
-}
+static FILE *log = 0;
+static int close_log = 0;
 
 /*------------------------------------------------------------------------*/
 
-static FILE *log = 0;
-static int close_log = 0;
+static void
+usage (void)
+{
+  fprintf (log, USAGE);
+  fflush (log);
+}
 
 /*------------------------------------------------------------------------*/
 
@@ -925,6 +928,7 @@ ctime_without_new_line (time_t * t)
 int
 main (int argc, char **argv)
 {
+  const char * log_name = 0, * tmp_name;
   int i, j, res, status, s, ok;
   char signal_description[80];
   const char * description;
@@ -934,6 +938,57 @@ main (int argc, char **argv)
 
   log = stderr;
   assert (!close_log);
+
+  for (i = 1; i < argc; i++)
+    {
+      if (argv[i][0] == '-')
+	{
+	  tmp_name = 0;
+
+	  switch (argv[i][1])
+	    {
+	      case 'o':
+	        if (++i == argc)
+		  error ("file argument to '-o' missing (try '-h')");
+		tmp_name = argv[i];
+	        break;
+
+	      case 's':
+	      case 't':
+	        i++;
+		continue;
+
+	      case 'k':
+	      case 'h':
+	        continue;
+
+	      case '-':
+	        if (strstr (argv[i], "--output-file=") == argv[i])
+		  {
+		    tmp_name = strchr (argv[i], '=');
+		    assert (tmp_name);
+		    assert (*tmp_name == '=');
+		    tmp_name++;
+		    break;
+		  }
+		else
+		  continue;
+	    }
+
+	  if (log_name)
+	    error ("multiple output files '%s' and '%s'",
+	      log_name, tmp_name);
+
+	  assert (tmp_name);
+	  log_name = tmp_name;
+	  log = fopen (log_name, "w");
+	  if (!log)
+	    error ("can not write output to '%s'", log_name);
+	  close_log = 1;
+	}
+      else
+	break;
+    }
 
   pid_max = get_pid_max ();
   if (pid_max > PID_MAX)
@@ -953,7 +1008,13 @@ main (int argc, char **argv)
     {
       if (argv[i][0] == '-')
 	{
-	  if (argv[i][1] == 't')
+	  if (argv[i][1] == 'o')
+	    {
+	      assert (close_log);
+	      i++;
+	      assert (i < argc);
+	    }
+	  else if (argv[i][1] == 't')
 	    {
 	      time_limit = parse_number_argument (&i, argc, argv);
 	    }
@@ -964,6 +1025,10 @@ main (int argc, char **argv)
 	  else if (argv[i][1] == 'r')
 	    {
 	      real_time_limit = parse_number_argument (&i, argc, argv);
+	    }
+	  else if (strstr (argv[i], "--output-file=") == argv[i])
+	    {
+	      assert (close_log);
 	    }
 	  else if (strstr (argv[i], "--real-time-limit=") == argv[i])
 	    {

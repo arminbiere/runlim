@@ -164,7 +164,7 @@ message (const char * type, const char * fmt, ...)
   fputs ("[runlim] ", log);
   fputs (type, log);
   fputc (':', log);
-  for (len = strlen (type); len < 22; len += 8)
+  for (len = strlen (type); len < 14; len += 8)
     fputc ('\t', log);
   fputc ('\t', log);
   va_start (ap, fmt);

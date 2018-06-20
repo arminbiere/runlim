@@ -2,7 +2,12 @@
 echo $0
 head -4 /proc/$$/stat|cut -d ' ' -f 1-6
 i=0
-while true;
+while [ $i -lt 2 ]
 do
-  i=`expr $i + 1`
+  if [ $i = 1 ]
+  then
+    i=0
+  else
+    i=1
+  fi
 done

@@ -47,15 +47,15 @@ typedef enum Status Status;
 
 enum Status
 {
-  OK,
-  OUT_OF_TIME,
-  OUT_OF_MEMORY,
-  SEGMENTATION_FAULT,
-  BUS_ERROR,
-  OTHER_SIGNAL,
-  FORK_FAILED,
-  INTERNAL_ERROR,
-  EXEC_FAILED
+  OK = 0,
+  OUT_OF_TIME = 1,
+  OUT_OF_MEMORY = 2,
+  BUS_ERROR = 7,
+  SEGMENTATION_FAULT = 11,
+  OTHER_SIGNAL = 100,
+  INTERNAL_ERROR = 300,
+  FORK_FAILED = 200,
+  EXEC_FAILED = 1000
 };
 
 /*------------------------------------------------------------------------*/
@@ -66,8 +66,8 @@ struct Process
   char active;
   char cyclic_sampling;
   char cyclic_killing;
-  long pid;
-  long ppid;
+  int pid;
+  int ppid;
   long sampled;
   double time;
   double memory;
@@ -740,6 +740,8 @@ kill_all_child_processes (void)
   int ignore;
   long read;
 
+  assert (getpid () == parent_pid);
+
   pthread_mutex_lock (&mutex);
   if (!(ignore = killing)) killing = 1;
   pthread_mutex_unlock (&mutex);
@@ -809,6 +811,16 @@ report (double time, double memory)
 
 /*------------------------------------------------------------------------*/
 
+void print_process_tree (Process * p)
+{
+  Process * c;
+  message ("edge", "%d -> %d\n", p->ppid, p->pid);
+  for (c = p->child; c; c = c->sibbling)
+    print_process_tree (c);
+}
+
+/*------------------------------------------------------------------------*/
+
 static long sample_rate = SAMPLE_RATE;
 static long report_rate = REPORT_RATE;
 
@@ -820,6 +832,7 @@ sample_all_child_processes (int s)
   int ignore;
 
   assert (s == SIGALRM);
+  assert (getpid () == parent_pid);
 
   pthread_mutex_lock (&mutex);
   ignore = killing;
@@ -858,7 +871,10 @@ sample_all_child_processes (int s)
     {
       num_samples_since_last_report = 0;
       if (sampled > 0)
-	report (sampled_time, sampled_memory);
+	{
+	  report (sampled_time, sampled_memory);
+	  print_process_tree (find_process (child_pid));
+	}
     }
 
   if (sampled > 0)

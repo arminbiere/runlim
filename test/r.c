@@ -9,23 +9,15 @@ int print () {
   sprintf (cmd, "head -4 /proc/%d/stat|cut -d ' ' -f 1-6", getpid ());
   return system (cmd);
 }
-char * line;
-int size, num;
 int main () {
   int res = print ();
-  FILE * file =
-    popen ("head -4 /proc/$$/stat|cut -d ' ' -f 1-6; exec yes", "r");
-  line = malloc (size = 128);
-  int ch;
+  FILE * file = popen ("./c.sh", "r");
+  int ch, first = 0;
   while ((ch = getc (file)) != EOF) {
-    if (size == num) line = realloc (line, size *= 2);
-    if (ch == '\n') {
-      line[num++] = 0;
-      if (strcmp (line, "y")) printf ("%s\n", line), fflush (stdout);
-      num = 0;
-    } else line[num++] = ch;
+    if (!first) first = ch;
+    if (first != 'y') fputc (ch, stdout);
+    if (ch == '\n') first = 0;
   }
   pclose (file);
-  free (line);
   return res;
 }

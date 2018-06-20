@@ -363,6 +363,8 @@ get_clock_ticks ()
 
 static int child_pid = -1;
 static int parent_pid = -1;
+static int group_pid = -1;
+static int session_pid = -1;
 
 /*------------------------------------------------------------------------*/
 
@@ -527,13 +529,21 @@ NEXT_PROCESS:
 	      if (ppid < 0) goto NEXT_PROCESS;
 	      if (ppid >= pid_max) goto NEXT_PROCESS;
 	      break;
-	    case STIME_POS:
-	      if (sscanf (token, "%ld", &stime) != 1) goto NEXT_PROCESS;
-	      if (stime < 0) goto NEXT_PROCESS;
+	    case PGID_POS:
+	      if (sscanf (token, "%ld", &tmp) != 1) goto NEXT_PROCESS;
+	      if (tmp != group_pid) goto NEXT_PROCESS;
+	      break;
+	    case SESSION_POS:
+	      if (sscanf (token, "%ld", &tmp) != 1) goto NEXT_PROCESS;
+	      if (tmp != session_pid) goto NEXT_PROCESS;
 	      break;
 	    case UTIME_POS:
 	      if (sscanf (token, "%ld", &utime) != 1) goto NEXT_PROCESS;
 	      if (utime < 0) goto NEXT_PROCESS;
+	      break;
+	    case STIME_POS:
+	      if (sscanf (token, "%ld", &stime) != 1) goto NEXT_PROCESS;
+	      if (stime < 0) goto NEXT_PROCESS;
 	      break;
 	    case RSS_POS:
 	      if (sscanf (token, "%ld", &rss) != 1) goto NEXT_PROCESS;
@@ -1110,6 +1120,8 @@ main (int argc, char **argv)
   start_time = wall_clock_time();
 
   parent_pid = getpid ();
+  group_pid = getpgid (0);
+  session_pid = getsid (0);
   child_pid = fork ();
 
   if (child_pid != 0)
@@ -1129,8 +1141,10 @@ main (int argc, char **argv)
 	  old_sig_term_handler = signal (SIGTERM, sig_other_handler);
 	  old_sig_abrt_handler = signal (SIGABRT, sig_other_handler);
 
-	  message ("parent", "%d", (int) child_pid);
-	  message ("child", "%d", (int) parent_pid);
+	  message ("parent", "%d", child_pid);
+	  message ("group", "%d", group_pid);
+	  message ("session", "%d", session_pid);
+	  message ("child", "%d", parent_pid);
 
 	  timer.it_interval.tv_sec  = sample_rate / 1000000;
 	  timer.it_interval.tv_usec = sample_rate % 1000000;

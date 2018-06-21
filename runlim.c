@@ -13,6 +13,7 @@ See LICENSE for restrictions on using this software.
 #include <ctype.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -107,6 +108,9 @@ struct Process
 "  --report-rate=<number>     report rate in terms of sampling " \
 "(default %ld)\n" \
 "\n" \
+"  --debug                    print debugging information\n" \
+"  -d\n" \
+"\n" \
 "  --kill                     propagate signals\n" \
 "  -k\n" \
 "\n" \
@@ -114,8 +118,9 @@ struct Process
 
 /*------------------------------------------------------------------------*/
 
-static FILE *log = 0;
-static int close_log = 0;
+static FILE *log;
+static int close_log;
+static int debug_messages;
 
 /*------------------------------------------------------------------------*/
 
@@ -174,23 +179,42 @@ message (const char * type, const char * fmt, ...)
   fflush (log);
 }
 
+#define debug(TYPE,FMT,ARGS...) \
+do { \
+  if (debug_messages <= 0) break; \
+  message (TYPE, FMT, ##ARGS); \
+} while (0)
+
 /*------------------------------------------------------------------------*/
 
 static int
-isposnumber (const char *str)
+is_positive_long (const char *str, long * res_ptr)
 {
   const char *p;
-  int res;
+  int ch, digit;
+  long res;
 
-  if (*str)
+  if (!*str)
+    return 0;
+
+  res = 0;
+  for (p = str; (ch = *p); p++)
     {
-      for (res = 1, p = str; res && *p; p++)
-	res = isdigit ((int) *p);
-    }
-  else
-    res = 0;
+      if (LLONG_MAX/10 < res)
+	return 0;
 
-  return res;
+      res *= 10;
+      digit = ch - '0';
+
+      if (LLONG_MAX - digit < res)
+	return 0;
+
+      res += digit;
+    }
+
+  *res_ptr = res;
+
+  return 1;
 }
 
 /*------------------------------------------------------------------------*/
@@ -203,14 +227,11 @@ parse_number_argument (int *i, int argc, char **argv)
 
   if (argv[*i][2])
     {
-      if (isposnumber (argv[*i] + 2))
-	res = atol (argv[*i] + 2);
-      else
+      if (!is_positive_long (argv[*i] + 2, &res))
         error ("invalid argument in '%s'", argv[*i]);
     }
-  else if (*i + 1 < argc && isposnumber (argv[*i + 1]))
+  else if (*i + 1 < argc && is_positive_long (argv[*i + 1], &res))
     {
-      res = atol (argv[*i + 1]);
       *i += 1;
     }
   else
@@ -233,10 +254,8 @@ parse_number_rhs (char *str)
   if (!p[1])
     error ("argument missing in '%s'", str);
 
-  if (!isposnumber (p + 1))
+  if (!is_positive_long (p + 1, &res))
     error ("invalid argument in '%s'", str);
-
-  res = atol (p + 1);
 
   return res;
 }
@@ -337,8 +356,8 @@ get_page_size ()
   page_size = (long) sysconf (_SC_PAGE_SIZE);
   if (page_size <= 0) page_size = 4096;
   memory_per_page = page_size / (double)(1<<20);
-  message ("page size", "%ld bytes", page_size);
-  message ("memory per page", "%g MB", memory_per_page);
+  debug ("page size", "%ld bytes", page_size);
+  debug ("memory per page", "%g MB", memory_per_page);
 }
 
 static void
@@ -348,15 +367,19 @@ get_physical_memory ()
   assert (page_size > 0);
   tmp = page_size * sysconf (_SC_PHYS_PAGES);
   physical_memory = tmp / (double)(1<<20);
-  message ("physical memory", "%.0f MB", physical_memory);
+  debug ("physical memory", "%.0f MB", physical_memory);
 }
+
+#ifndef HZ
+#define HZ 100
+#endif
 
 static void
 get_clock_ticks ()
 {
   clock_ticks = sysconf (_SC_CLK_TCK);
-  if (!clock_ticks) clock_ticks = HZ;		// FIXME
-  message ("clock ticks", "%ld", clock_ticks);
+  if (clock_ticks <= 0) clock_ticks = HZ;
+  debug ("clock ticks", "%ld", clock_ticks);
 }
 
 /*------------------------------------------------------------------------*/
@@ -428,6 +451,7 @@ static volatile int killing;
 static void
 add_process (pid_t pid, pid_t ppid, double time, double memory)
 {
+  const char * type;
   Process * p;
 
   assert (0 < pid);
@@ -440,12 +464,22 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
   if (p->active)
     {
       p->new = 0;
+
       assert (p->pid == pid);
+      if (p->ppid != ppid)
+	{
+	  p->ppid = ppid;
+	  type = "radd (new parent)";
+	}
+      else
+	type = "readd";
+
       p->time = time;
       p->memory = memory;
     }
   else
     {
+      type = "add (new)";
       p->new = 1;
       p->active = 1;
       p->pid = pid;
@@ -456,6 +490,10 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
       if (active) active->next = p;
       else active = p;
     }
+
+  debug (type,
+    "%d (parent %d, %.3f sec, %.3f MB)",
+    pid, ppid, time, memory);
 
   p->sampled = num_samples;
 }
@@ -484,9 +522,10 @@ NEXT_PROCESS:
 
   while ((de = readdir (dir)) != NULL)
     {
-      pid = (pid_t) atoi (de->d_name);
+      if (!is_positive_long (de->d_name, &pid)) goto NEXT_PROCESS;
       if (pid <= 0) goto NEXT_PROCESS;
       if (pid >= pid_max) goto NEXT_PROCESS;
+      if (pid == parent_pid) goto NEXT_PROCESS;
 
       fit_path (strlen (proc) + strlen (de->d_name) + 20);
       sprintf (path, "%s/%ld/stat", proc, pid);
@@ -571,6 +610,7 @@ NEXT_PROCESS:
     }
   
   (void) closedir (dir);
+  debug ("read", "%ld processes", res);
 
   return res;
 }
@@ -593,6 +633,7 @@ static void
 connect_process_tree (void)
 {
   Process * p, * parent;
+  long connected = 0;
 
   for (p = active; p; p = p->next)
     {
@@ -605,11 +646,17 @@ connect_process_tree (void)
 
   for (p = active; p; p = p->next)
     {
+      if (p->pid == child_pid) continue;
+      assert (p->pid != parent_pid);
       parent = find_process (p->ppid);
       p->parent = parent;
       if (parent->child) parent->child->sibbling = p;
       else parent->child = p;
+      debug ("connect", "%d -> %d", p->ppid, p->pid);
+      connected++;
     }
+
+  debug ("connected", "%ld processes", connected);
 }
 
 /*------------------------------------------------------------------------*/
@@ -639,9 +686,12 @@ flush_inactive_processes (void)
 
 	  accumulated_time += p->time;
 	  p->active = 0;
+	  p->next = 0;
 	  res++;
 	}
     }
+
+  debug ("flushed", "%ld processes", res);
 
   return res;
 }
@@ -656,6 +706,7 @@ static double sampled_memory;
 static long
 sample_recursively (Process * p)
 {
+  const char * type;
   Process * child;
   long res = 0;
 
@@ -667,10 +718,20 @@ sample_recursively (Process * p)
 
   if (p->sampled == num_samples)
     {
-      if (p->new) children++;
+      if (p->new)
+	{
+	  children++;
+	  type = "sampling (new)";
+	}
+      else
+	type = "resampling";
+
       sampled_time += p->time;
       sampled_memory += p->memory;
+
       res++;
+      debug (type,
+        "%d (%.3f sec, %.3f MB)", p->pid, p->time, p->memory);
     }
 
   p->cyclic_sampling = 1;
@@ -733,6 +794,7 @@ kill_recursively (Process * p, void(*killer)(Process *))
 static void
 kill_all_child_processes (void)
 {
+  static void (*killer) (Process *);
   long ms = 8000;
   long rounds = 0;
   Process * p;
@@ -747,7 +809,7 @@ kill_all_child_processes (void)
   pthread_mutex_unlock (&mutex);
   if (ignore) return;
 
-  static void (*killer) (Process *);
+  debug ("killing", "all child processes");
 
   for (;;)
     {
@@ -755,6 +817,7 @@ kill_all_child_processes (void)
       else killer = kill_process;
 
       read = read_processes ();
+
       killed = 0;
 
       if (read > 0)
@@ -764,6 +827,8 @@ kill_all_child_processes (void)
 	  if (p->active)
 	    killed = kill_recursively (p, killer);
 	}
+
+      debug ("killed", "%ld processes", killed);
 
       if (!killed) break;
       if (rounds++ > 9) break;
@@ -805,8 +870,7 @@ static void
 report (double time, double memory)
 {
   double real = real_time ();
-  message ("sample",
-    "%.1f time, %.1f real, %.1f MB", time, real, memory);
+  message ("sample", "%.2f time, %.2f real, %.0f MB", time, real, memory);
 }
 
 /*------------------------------------------------------------------------*/
@@ -814,7 +878,7 @@ report (double time, double memory)
 void print_process_tree (Process * p)
 {
   Process * c;
-  message ("edge", "%d -> %d\n", p->ppid, p->pid);
+  debug ("edge", "%d -> %d", p->ppid, p->pid);
   for (c = p->child; c; c = c->sibbling)
     print_process_tree (c);
 }
@@ -855,6 +919,8 @@ sample_all_child_processes (int s)
   else
     sampled = 0;
 
+  debug ("sampled", "%ld processes", sampled);
+
   sampled += flush_inactive_processes ();
   sampled_time += accumulated_time;
 
@@ -872,8 +938,8 @@ sample_all_child_processes (int s)
       num_samples_since_last_report = 0;
       if (sampled > 0)
 	{
-	  report (sampled_time, sampled_memory);
 	  print_process_tree (find_process (child_pid));
+	  report (sampled_time, sampled_memory);
 	}
     }
 
@@ -993,8 +1059,9 @@ main (int argc, char **argv)
 	        i++;
 		continue;
 
-	      case 'k':
+	      case 'd':
 	      case 'h':
+	      case 'k':
 	        continue;
 
 	      case '-':
@@ -1094,6 +1161,11 @@ main (int argc, char **argv)
 	      fflush (stdout);
 	      exit (0);
 	    }
+	  else if (strcmp (argv[i], "-d") == 0 ||
+	           strcmp (argv[i], "--debug") == 0)
+	    {
+	      debug_messages = 1;
+	    }
 	  else if (strcmp (argv[i], "-k") == 0 ||
 	           strcmp (argv[i], "--kill") == 0)
 	    {
@@ -1157,10 +1229,10 @@ main (int argc, char **argv)
 	  old_sig_term_handler = signal (SIGTERM, sig_other_handler);
 	  old_sig_abrt_handler = signal (SIGABRT, sig_other_handler);
 
-	  message ("parent", "%d", child_pid);
-	  message ("group", "%d", group_pid);
-	  message ("session", "%d", session_pid);
-	  message ("child", "%d", parent_pid);
+	  message ("child", "%d", child_pid);
+	  debug ("group", "%d", group_pid);
+	  debug ("session", "%d", session_pid);
+	  debug ("parent", "%d", parent_pid);
 
 	  timer.it_interval.tv_sec  = sample_rate / 1000000;
 	  timer.it_interval.tv_usec = sample_rate % 1000000;
@@ -1286,7 +1358,7 @@ FORCE_OUT_OF_TIME_ENTRY:
   message ("children", "%d", children);
   message ("real", "%.2f seconds", real);
   message ("time", "%.2f seconds", max_time);
-  message ("space", "%.1f MB", max_memory);
+  message ("space", "%.0f MB", max_memory);
   message ("samples", "%ld", num_samples);
 
   if (close_log)

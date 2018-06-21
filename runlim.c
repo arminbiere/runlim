@@ -391,16 +391,18 @@ static int session_pid = -1;
 
 /*------------------------------------------------------------------------*/
 
-static long num_samples_since_last_report = 0;
-static long num_samples = 0;
+static long num_samples;
+static long num_reports;
 
-static double max_time = 0;
-static double max_memory = 0;
+static long num_samples_since_last_report;
+
+static double max_time;
+static double max_memory;
 
 /*------------------------------------------------------------------------*/
 
-static int propagate_signals = 0;
-static int children = 0;
+static int propagate_signals;
+static int children;
 
 /*------------------------------------------------------------------------*/
 
@@ -443,7 +445,8 @@ fit_path (size_t len)
 /*------------------------------------------------------------------------*/
 
 static Process process[PID_MAX];
-static Process * active;
+static Process * active_processes;
+static Process * last_active_process;
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile int killing;
@@ -469,10 +472,10 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
       if (p->ppid != ppid)
 	{
 	  p->ppid = ppid;
-	  type = "radd (new parent)";
+	  type = "add (new parent)";
 	}
       else
-	type = "readd";
+	type = "add";
 
       p->time = time;
       p->memory = memory;
@@ -487,8 +490,16 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
       p->time = time;
       p->memory = memory;
       p->next = 0;
-      if (active) active->next = p;
-      else active = p;
+
+      if (last_active_process)
+	last_active_process->next = p;
+      else
+	{
+	  assert (!active_processes);
+	  active_processes = p;
+	}
+
+      last_active_process = p;
     }
 
   debug (type,
@@ -610,7 +621,7 @@ NEXT_PROCESS:
     }
   
   (void) closedir (dir);
-  debug ("read", "%ld processes", res);
+  debug ("added", "%ld processes", res);
 
   return res;
 }
@@ -635,7 +646,7 @@ connect_process_tree (void)
   Process * p, * parent;
   long connected = 0;
 
-  for (p = active; p; p = p->next)
+  for (p = active_processes; p; p = p->next)
     {
       assert (p->active);
       assert (find_process (p->pid) == p);
@@ -644,7 +655,7 @@ connect_process_tree (void)
       clear_tree_connections (p);
     }
 
-  for (p = active; p; p = p->next)
+  for (p = active_processes; p; p = p->next)
     {
       if (p->pid == child_pid) continue;
       assert (p->pid != parent_pid);
@@ -668,28 +679,38 @@ static double accumulated_time;
 static long
 flush_inactive_processes (void)
 {
-  Process * prev = 0, * p, * next;
+  Process * prev = 0;
+  Process * next;
   long res = 0;
+  Process * p;
 
-  for (p = active; p; p = next)
+  for (p = active_processes; p; p = next)
     {
       assert (p->active);
+
       next = p->next;
+
       if (p->sampled == num_samples)
 	{
 	  prev = p;
 	}
       else
 	{
-	  if (prev) prev->next = next;
-	  else active = next;
-
-	  accumulated_time += p->time;
 	  p->active = 0;
+
+	  if (prev)
+	    prev->next = next;
+	  else
+	    active_processes = next;
+
+	  debug ("deactive", "%d (%.3f sec)", p->pid, p->time);
+	  accumulated_time += p->time;
 	  p->next = 0;
 	  res++;
 	}
     }
+
+  last_active_process = prev;
 
   debug ("flushed", "%ld processes", res);
 
@@ -724,7 +745,7 @@ sample_recursively (Process * p)
 	  type = "sampling (new)";
 	}
       else
-	type = "resampling";
+	type = "sampling";
 
       sampled_time += p->time;
       sampled_memory += p->memory;
@@ -759,6 +780,7 @@ static void
 term_process (Process * p)
 {
   assert (p->pid != parent_pid);
+  debug ("terminate", "%d", p->pid);
   kill (p->pid, SIGTERM);
 }
 
@@ -766,6 +788,7 @@ static void
 kill_process (Process * p)
 {
   assert (p->pid != parent_pid);
+  debug ("kill", "%d", p->pid);
   kill (p->pid, SIGKILL);
 }
 
@@ -871,6 +894,7 @@ report (double time, double memory)
 {
   double real = real_time ();
   message ("sample", "%.2f time, %.2f real, %.0f MB", time, real, memory);
+  num_reports++;
 }
 
 /*------------------------------------------------------------------------*/
@@ -966,8 +990,8 @@ sample_all_child_processes (int s)
 
 /*------------------------------------------------------------------------*/
 
-static volatile int caught_usr1_signal = 0;
-static volatile int caught_other_signal = 0;
+static volatile int caught_usr1_signal;
+static volatile int caught_other_signal;
 
 static pthread_mutex_t caught_other_signal_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -1360,6 +1384,7 @@ FORCE_OUT_OF_TIME_ENTRY:
   message ("time", "%.2f seconds", max_time);
   message ("space", "%.0f MB", max_memory);
   message ("samples", "%ld", num_samples);
+  debug ("reports", "%ld", num_samples);
 
   if (close_log)
     {

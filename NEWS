@@ -3,7 +3,11 @@ News for Version 1.13
 
 - kill all child processes
 
-- new more uniform sampling code
+- more options (sampling/report rate, debugging)
+
+- more robust 'proc' and option parsing code
+
+- completely reworked process tree organization
 
 - closing 'log' if necessary
   (thanks to Viktor Schuppan)

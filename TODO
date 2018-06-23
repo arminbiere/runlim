@@ -1,4 +1,2 @@
-- first generate a map of process ids to processes
-- then sample a process tree as before
-- make sure to actually only sample (transitive) children
-- delete removed processes and accumalate their time
+- sample and report temporary disk space
+- sample and report CPU load

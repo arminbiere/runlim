@@ -30,8 +30,8 @@ See LICENSE for restrictions on using this software.
 
 /*------------------------------------------------------------------------*/
 
-#define SAMPLE_RATE 100000l	/* in milliseconds */
-#define REPORT_RATE 100l	/* in terms of sampling */
+#define SAMPLE_RATE 10000l	/* in microseconds */
+#define REPORT_RATE 1000l	/* in terms of sampling */
 
 /*------------------------------------------------------------------------*/
 
@@ -102,7 +102,7 @@ struct Process
 "  --real-time-limit=<number> set real time limit to <number> seconds\n" \
 "  -r <number>\n"\
 "\n" \
-"  --sample-rate=<number>     sample rate in milliseconds " \
+"  --sample-rate=<number>     sample rate in microseconds " \
 "(default %ld)\n" \
 "\n" \
 "  --report-rate=<number>     report rate in terms of sampling " \
@@ -406,7 +406,7 @@ static int children;
 
 /*------------------------------------------------------------------------*/
 
-/* see 'man 5 proc' for explanation of these fields */
+/* Do 'man 5 proc' and search for 'proc..pid..stat' for explanations. */
 
 #define PID_POS 1
 #define COMM_POS 2
@@ -613,7 +613,9 @@ NEXT_PROCESS:
 	  if (!token) goto NEXT_PROCESS;
 	}
 
-      time = (utime + stime) / clock_ticks;
+      debug ("utime", "%f microseconds", utime);
+      debug ("stime", "%f microseconds", stime);
+      time = (utime + stime) / (double) clock_ticks;
       memory = rss * memory_per_page;
 
       add_process (pid, ppid, time, memory);
@@ -806,7 +808,6 @@ kill_recursively (Process * p, void(*killer)(Process *))
     res += kill_recursively (child, killer);
   assert (p->cyclic_killing);
   p->cyclic_killing = 0;
-  usleep (100);
 
   killer (p);
   res++;
@@ -1256,6 +1257,8 @@ main (int argc, char **argv)
 	  debug ("group", "%d", group_pid);
 	  debug ("session", "%d", session_pid);
 	  debug ("parent", "%d", parent_pid);
+
+	  usleep (10000);
 
 	  timer.it_interval.tv_sec  = sample_rate / 1000000;
 	  timer.it_interval.tv_usec = sample_rate % 1000000;

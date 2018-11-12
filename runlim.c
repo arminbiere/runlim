@@ -1057,7 +1057,7 @@ main (int argc, char **argv)
   int i, j, res, status, s, ok;
   char signal_description[80];
   const char * description;
-  struct rlimit l;
+  // struct rlimit l;
   double real;
   time_t t;
 
@@ -1303,6 +1303,7 @@ main (int argc, char **argv)
     }
   else
     {
+#if 0
       unsigned hard_time_limit;
 
       if (time_limit < real_time_limit)
@@ -1312,6 +1313,7 @@ main (int argc, char **argv)
 	  l.rlim_cur = l.rlim_max = hard_time_limit;
 	  setrlimit (RLIMIT_CPU, &l);
 	}
+#endif
 
       execvp (argv[i], argv + i);
       kill (getppid (), SIGUSR1);		// TODO DOES THIS WORK?

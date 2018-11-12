@@ -818,7 +818,7 @@ static void
 kill_all_child_processes (void)
 {
   static void (*killer) (Process *);
-  long ms = 8000;
+  long ms = 16000;
   long rounds = 0;
   Process * p;
   long killed;
@@ -836,7 +836,7 @@ kill_all_child_processes (void)
 
   for (;;)
     {
-      if (ms < 2000) killer = term_process;
+      if (ms > 2000) killer = term_process;
       else           killer = kill_process;
 
       read = read_processes ();
@@ -1057,7 +1057,6 @@ main (int argc, char **argv)
   int i, j, res, status, s, ok;
   char signal_description[80];
   const char * description;
-  // struct rlimit l;
   double real;
   time_t t;
 
@@ -1303,18 +1302,6 @@ main (int argc, char **argv)
     }
   else
     {
-#if 0
-      unsigned hard_time_limit;
-
-      if (time_limit < real_time_limit)
-	{
-	  hard_time_limit = time_limit;
-	  hard_time_limit = (hard_time_limit * 101 + 99) / 100;	// + 1%
-	  l.rlim_cur = l.rlim_max = hard_time_limit;
-	  setrlimit (RLIMIT_CPU, &l);
-	}
-#endif
-
       execvp (argv[i], argv + i);
       kill (getppid (), SIGUSR1);		// TODO DOES THIS WORK?
       exit (1);

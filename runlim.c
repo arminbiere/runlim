@@ -30,8 +30,8 @@ See LICENSE for restrictions on using this software.
 
 /*------------------------------------------------------------------------*/
 
-#define SAMPLE_RATE 10000l	/* in microseconds */
-#define REPORT_RATE 1000l	/* in terms of sampling */
+#define SAMPLE_RATE 100000l	/* in microseconds */
+#define REPORT_RATE 100l	/* in terms of sampling */
 
 /*------------------------------------------------------------------------*/
 

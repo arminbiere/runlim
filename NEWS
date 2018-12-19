@@ -1,6 +1,8 @@
 News for Version 1.13
 ---------------------
 
+- added '--single' option
+
 - kill all child processes
 
 - more options (sampling/report rate, debugging)

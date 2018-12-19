@@ -111,6 +111,8 @@ struct Process
 "  --debug                    print debugging information\n" \
 "  -d\n" \
 "\n" \
+"  --single                   assume single child process\n" \
+"\n" \
 "  --kill                     propagate signals\n" \
 "  -k\n" \
 "\n" \
@@ -287,13 +289,13 @@ push_buffer (int ch)
 static const char *
 read_host_name ()
 {
-  const char * path = "/proc/sys/kernel/hostname";
+  const char * host_name_path = "/proc/sys/kernel/hostname";
   FILE * file;
   int ch;
 
-  file = fopen (path, "r");
+  file = fopen (host_name_path, "r");
   if (!file)
-    error ("can not open '%s' for reading", path);
+    error ("can not open '%s' for reading", host_name_path);
 
   pos_buffer = 0;
   while ((ch = getc_unlocked (file)) != EOF && ch != '\n')
@@ -309,25 +311,25 @@ read_host_name ()
 static long
 read_pid_max ()
 {
-  const char * path = "/proc/sys/kernel/pid_max";
+  const char * pid_max_path = "/proc/sys/kernel/pid_max";
   FILE * file;
   long res;
 
-  file = fopen (path, "r");
+  file = fopen (pid_max_path, "r");
   if (!file)
-    error ("can not open '%s' for reading", path);
+    error ("can not open '%s' for reading", pid_max_path);
 
   if (fscanf (file, "%ld", &res) != 1)
-    error ("failed to read maximum process id from '%s'", path);
+    error ("failed to read maximum process id from '%s'", pid_max_path);
 
   if (res < 32768)
-    error ("tiny maximum process id '%ld' in '%s'", res, path);
+    error ("tiny maximum process id '%ld' in '%s'", res, pid_max_path);
 
   if (res > (1l << 22))
-    error ("huge maximum process id '%ld' in '%s'", res, path);
+    error ("huge maximum process id '%ld' in '%s'", res, pid_max_path);
 
   if (fclose (file))
-    warning ("failed to close file '%s'", path);
+    warning ("failed to close file '%s'", pid_max_path);
 
   return res;
 }
@@ -401,6 +403,7 @@ static double max_memory;
 
 /*------------------------------------------------------------------------*/
 
+static int single;
 static int propagate_signals;
 static int children;
 
@@ -424,23 +427,6 @@ static double start_time;
 static double time_limit;
 static double real_time_limit;
 static double space_limit;
-
-/*------------------------------------------------------------------------*/
-
-static char * path;
-static size_t size_path;
-
-static void
-fit_path (size_t len)
-{
-  if (len > size_path)
-    {
-      size_path = 2*len;
-      path = realloc (path, size_path);
-      if (!path)
-	error ("out-of-memory reallocating path");
-    }
-}
 
 /*------------------------------------------------------------------------*/
 
@@ -511,121 +497,133 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
 
 /*------------------------------------------------------------------------*/
 
-static long
-read_processes (void)
+static int
+read_process (long pid)
 {
   char *token, *comm, *end_of_comm, *after_comm;
-  const char * proc = "/proc";
   long utime, stime, rss;
-  long pid, ppid, tmp;
   double time, memory;
-  struct dirent *de;
+  long ppid, tmp;
+  char path[64];
   FILE *file;
   int i, ch;
+
+  sprintf (path, "/proc/%ld/stat", pid);
+  file = fopen (path, "r");
+  if (!file) return 0;
+
+  pos_buffer = 0;
+  while ((ch = getc_unlocked (file)) != EOF)
+    push_buffer (ch);
+  push_buffer (0);
+  
+  (void) fclose (file);	/* ignore return value */
+
+  comm = strchr (buffer, '(');
+  if (!comm++) return 0;
+  end_of_comm = strrchr (comm, ')');
+  if (!end_of_comm) return 0;
+  *end_of_comm = 0;
+  after_comm = end_of_comm + 1;
+  if (*after_comm++ != ' ') return 0;
+  
+  ppid = -1;
+  utime = -1;
+  stime = -1;
+  rss = -1;
+
+  token = strtok (buffer, " ");
+  if (!token) return 0;
+
+  for (i = 1; i <= MAX_POS; i++)
+    {
+      switch (i)
+	{
+	case PID_POS:
+	  if (sscanf (token, "%ld", &tmp) != 1) return 0;
+	  if (tmp != pid) return 0;
+	  break;
+	case PPID_POS:
+	  if (sscanf (token, "%ld", &ppid) != 1) return 0;
+	  if (ppid < 0) return 0;
+	  if (ppid >= pid_max) return 0;
+	  break;
+	case PGID_POS:
+	  if (sscanf (token, "%ld", &tmp) != 1) return 0;
+	  if (tmp != group_pid) return 0;
+	  break;
+	case SESSION_POS:
+	  if (sscanf (token, "%ld", &tmp) != 1) return 0;
+	  if (tmp != session_pid) return 0;
+	  break;
+	case UTIME_POS:
+	  if (sscanf (token, "%ld", &utime) != 1) return 0;
+	  if (utime < 0) return 0;
+	  break;
+	case STIME_POS:
+	  if (sscanf (token, "%ld", &stime) != 1) return 0;
+	  if (stime < 0) return 0;
+	  break;
+	case RSS_POS:
+	  if (sscanf (token, "%ld", &rss) != 1) return 0;
+	  if (rss < 0) return 0;
+	  break;
+	default:
+	  break;
+	}
+
+      if (i + 1 == COMM_POS)
+	token = comm;
+      else if (i == COMM_POS)
+	token = strtok (after_comm, " ");
+      else
+	token = strtok (0, " ");
+
+      if (!token) return 0;
+    }
+
+  debug ("utime", "%f microseconds", utime);
+  debug ("stime", "%f microseconds", stime);
+  time = (utime + stime) / (double) clock_ticks;
+  memory = rss * memory_per_page;
+
+  add_process (pid, ppid, time, memory);
+  return 1;
+}
+
+/*------------------------------------------------------------------------*/
+
+static long
+read_all_processes (void)
+{
+  struct dirent *de;
+  long pid;
   DIR *dir;
 
   long res = 0;
 
-  if (!(dir = opendir (proc)))
-    error ("can not open directory '%s'", proc);
-
-NEXT_PROCESS:
+  if (!(dir = opendir ("/proc")))
+    error ("can not open directory '/proc'");
 
   while ((de = readdir (dir)) != NULL)
     {
-      if (!is_positive_long (de->d_name, &pid)) goto NEXT_PROCESS;
-      if (pid <= 0) goto NEXT_PROCESS;
-      if (pid >= pid_max) goto NEXT_PROCESS;
-      if (pid == parent_pid) goto NEXT_PROCESS;
-
-      fit_path (strlen (proc) + strlen (de->d_name) + 20);
-      sprintf (path, "%s/%ld/stat", proc, pid);
-      file = fopen (path, "r");
-      if (!file) goto NEXT_PROCESS;
-
-      pos_buffer = 0;
-      while ((ch = getc_unlocked (file)) != EOF)
-	push_buffer (ch);
-      push_buffer (0);
-      
-      (void) fclose (file);	/* ignore return value */
-
-      comm = strchr (buffer, '(');
-      if (!comm++) goto NEXT_PROCESS;
-      end_of_comm = strrchr (comm, ')');
-      if (!end_of_comm) goto NEXT_PROCESS;
-      *end_of_comm = 0;
-      after_comm = end_of_comm + 1;
-      if (*after_comm++ != ' ') goto NEXT_PROCESS;
-      
-      ppid = -1;
-      utime = -1;
-      stime = -1;
-      rss = -1;
-
-      token = strtok (buffer, " ");
-      if (!token) goto NEXT_PROCESS;
-
-      for (i = 1; i <= MAX_POS; i++)
-	{
-	  switch (i)
-	    {
-	    case PID_POS:
-	      if (sscanf (token, "%ld", &tmp) != 1) goto NEXT_PROCESS;
-	      if (tmp != pid) goto NEXT_PROCESS;
-	      break;
-	    case PPID_POS:
-	      if (sscanf (token, "%ld", &ppid) != 1) goto NEXT_PROCESS;
-	      if (ppid < 0) goto NEXT_PROCESS;
-	      if (ppid >= pid_max) goto NEXT_PROCESS;
-	      break;
-	    case PGID_POS:
-	      if (sscanf (token, "%ld", &tmp) != 1) goto NEXT_PROCESS;
-	      if (tmp != group_pid) goto NEXT_PROCESS;
-	      break;
-	    case SESSION_POS:
-	      if (sscanf (token, "%ld", &tmp) != 1) goto NEXT_PROCESS;
-	      if (tmp != session_pid) goto NEXT_PROCESS;
-	      break;
-	    case UTIME_POS:
-	      if (sscanf (token, "%ld", &utime) != 1) goto NEXT_PROCESS;
-	      if (utime < 0) goto NEXT_PROCESS;
-	      break;
-	    case STIME_POS:
-	      if (sscanf (token, "%ld", &stime) != 1) goto NEXT_PROCESS;
-	      if (stime < 0) goto NEXT_PROCESS;
-	      break;
-	    case RSS_POS:
-	      if (sscanf (token, "%ld", &rss) != 1) goto NEXT_PROCESS;
-	      if (rss < 0) goto NEXT_PROCESS;
-	      break;
-	    default:
-	      break;
-	    }
-
-	  if (i + 1 == COMM_POS)
-	    token = comm;
-	  else if (i == COMM_POS)
-	    token = strtok (after_comm, " ");
-	  else
-	    token = strtok (0, " ");
-
-	  if (!token) goto NEXT_PROCESS;
-	}
-
-      debug ("utime", "%f microseconds", utime);
-      debug ("stime", "%f microseconds", stime);
-      time = (utime + stime) / (double) clock_ticks;
-      memory = rss * memory_per_page;
-
-      add_process (pid, ppid, time, memory);
-      res++;
+      if (!is_positive_long (de->d_name, &pid)) continue;
+      if (pid <= 0) continue;
+      if (pid >= pid_max) continue;
+      if (pid == parent_pid) continue;
+      if (read_process (pid)) res++;
     }
   
   (void) closedir (dir);
   debug ("added", "%ld processes", res);
 
   return res;
+}
+
+static long
+read_processes (void) {
+  if (single) return read_process (child_pid);
+  else return read_all_processes ();
 }
 
 static Process *
@@ -1190,6 +1188,10 @@ main (int argc, char **argv)
 	    {
 	      debug_messages = 1;
 	    }
+	  else if (strcmp (argv[i], "--single") == 0)
+	    {
+	      single = 1;
+	    }
 	  else if (strcmp (argv[i], "-k") == 0 ||
 	           strcmp (argv[i], "--kill") == 0)
 	    {
@@ -1387,9 +1389,6 @@ FORCE_OUT_OF_TIME_ENTRY:
 
   if (buffer)
     free (buffer);
-
-  if (path)
-    free (path);
 
   restore_signal_handlers ();
 

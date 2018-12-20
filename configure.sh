@@ -38,7 +38,7 @@ COMPILE="$COMPILE -DVERSION=$VERSION"
 if [ -f /proc/sys/kernel/pid_max ]
 then
   PID_MAX=`cat /proc/sys/kernel/pid_max`
-  COMPILE="$COMPILE -DPIDX_MAX=$PID_MAX"
+  COMPILE="$COMPILE -DPID_MAX=$PID_MAX"
 fi
 echo "$COMPILE"
 sed -e "s,@COMPILE@,$COMPILE," makefile.in > makefile

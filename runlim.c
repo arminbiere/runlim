@@ -286,6 +286,74 @@ push_buffer (int ch)
 
 /*------------------------------------------------------------------------*/
 
+static int
+try_to_remount_proc_file_system (void)
+{
+  const char * remount_path = "runlim-remount-proc";
+  const char * type = "remount '/proc'";
+  int pid, res, status;
+
+  debug (type, "trying to remount '/proc' file system");
+
+  pid = fork ();
+  if (pid < 0)
+    return 0;
+
+  if (!pid)
+    {
+      execlp (remount_path, remount_path, (char*) 0);
+      exit (2);
+    }
+
+  res = waitpid (pid, &status, 0);
+  if (res < 0)
+    {
+      debug (type, "failed to wait for '%s' process child", remount_path);
+      return 0;
+    }
+
+  assert (res == pid);
+
+  if (!WIFEXITED (status))
+    {
+      debug (type, "'%s' process did not exit properly", remount_path);
+      return 0;
+    }
+
+  res = WEXITSTATUS (status);
+  if (res == 2)
+    {
+      debug (type, "execution of '%s' process failed", remount_path);
+      return 0;
+    }
+
+  if (res)
+    {
+      debug (type, "mounting '/proc' through '%s' failed", remount_path);
+      return 0;
+    }
+
+  warning ("remounted '/proc' file system");
+
+  return 1;
+}
+
+static FILE *
+open_proc_file_path_for_reading (const char * path)
+{
+  FILE * file = fopen (path, "r");
+  if (!file)
+    {
+      if (try_to_remount_proc_file_system ())
+	file = fopen (path, "r");
+      if (!file)
+	error ("can not open '%s' for reading", path);
+    }
+  return file;
+}
+
+/*------------------------------------------------------------------------*/
+
 static const char *
 read_host_name ()
 {
@@ -293,9 +361,7 @@ read_host_name ()
   FILE * file;
   int ch;
 
-  file = fopen (host_name_path, "r");
-  if (!file)
-    error ("can not open '%s' for reading", host_name_path);
+  file = open_proc_file_path_for_reading (host_name_path);
 
   pos_buffer = 0;
   while ((ch = getc_unlocked (file)) != EOF && ch != '\n')
@@ -315,9 +381,7 @@ read_pid_max ()
   FILE * file;
   long res;
 
-  file = fopen (pid_max_path, "r");
-  if (!file)
-    error ("can not open '%s' for reading", pid_max_path);
+  file = open_proc_file_path_for_reading (pid_max_path);
 
   if (fscanf (file, "%ld", &res) != 1)
     error ("failed to read maximum process id from '%s'", pid_max_path);

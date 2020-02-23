@@ -4,6 +4,8 @@ runlim: runlim.c makefile
 remount: remount.c makefile
 	@COMPILE@ -o remount remount.c
 install: all
+	install -s -m 755 runlim @PREFIX@/runlim
+	install -s -m 4755 remount @PREFIX@/runlim-remount-proc
 clean:
 	rm -f runlim remount
 .PHONY: all clean install

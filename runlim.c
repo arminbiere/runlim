@@ -1,7 +1,7 @@
 /*------------------------------------------------------------------------*\
 
 Copyright (c) 2000-2004 Armin Biere, ETH Zurich.
-Copyright (c) 2005-2018 Armin Biere, Johannes Kepler University.
+Copyright (c) 2005-2020 Armin Biere, Johannes Kepler University.
 Copyright (c) 2007 Toni Jussila, Johannes Kepler University.
 
 See LICENSE for restrictions on using this software.

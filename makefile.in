@@ -1,5 +1,9 @@
+all: runlim remount
 runlim: runlim.c makefile
 	@COMPILE@ -o runlim runlim.c -lpthread
+remount: remount.c makefile
+	@COMPILE@ -o remount remount.c
+install: all
 clean:
-	rm -f runlim
-.PHONY: clean
+	rm -f runlim remount
+.PHONY: all clean install

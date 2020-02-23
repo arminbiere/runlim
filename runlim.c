@@ -666,8 +666,14 @@ read_all_processes (void)
 
   long res = 0;
 
-  if (!(dir = opendir ("/proc")))
-    error ("can not open directory '/proc'");
+  dir = opendir ("/proc");
+  if (!dir)
+    {
+      if (try_to_remount_proc_file_system ())
+	dir = opendir ("/proc");
+      if (!dir)
+	error ("can not open directory '/proc'");
+    }
 
   while ((de = readdir (dir)) != NULL)
     {

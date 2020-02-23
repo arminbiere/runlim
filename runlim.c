@@ -657,6 +657,20 @@ read_process (long pid)
 
 /*------------------------------------------------------------------------*/
 
+static void
+read_parent_status_and_mount_proc_file_system_if_necessary (void)
+{
+  char path[64];
+  FILE *file;
+
+  sprintf (path, "/proc/%ld/stat", (long) parent_pid);
+  file = fopen (path, "r");
+  if (file)
+    fclose (file);
+  else
+    (void) try_to_remount_proc_file_system ();
+}
+
 static long
 read_all_processes (void)
 {
@@ -674,6 +688,8 @@ read_all_processes (void)
       if (!dir)
 	error ("can not open directory '/proc'");
     }
+
+  read_parent_status_and_mount_proc_file_system_if_necessary ();
 
   while ((de = readdir (dir)) != NULL)
     {

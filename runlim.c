@@ -561,106 +561,6 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
 
 /*------------------------------------------------------------------------*/
 
-#if 0
-
-static int
-read_process (long pid)
-{
-  char *token, *comm, *end_of_comm, *after_comm;
-  long utime, stime, rss;
-  double time, memory;
-  long ppid, tmp;
-  char path[64];
-  FILE *file;
-  int i, ch;
-
-  sprintf (path, "/proc/%ld/stat", pid);
-  file = fopen (path, "r");
-  if (!file) return 0;
-
-  pos_buffer = 0;
-  while ((ch = getc_unlocked (file)) != EOF)
-    push_buffer (ch);
-  push_buffer (0);
-  
-  (void) fclose (file);	/* ignore return value */
-
-  comm = strchr (buffer, '(');
-  if (!comm++) return 0;
-  end_of_comm = strrchr (comm, ')');
-  if (!end_of_comm) return 0;
-  *end_of_comm = 0;
-  after_comm = end_of_comm + 1;
-  if (*after_comm++ != ' ') return 0;
-  
-  ppid = -1;
-  utime = -1;
-  stime = -1;
-  rss = -1;
-
-  token = strtok (buffer, " ");
-  if (!token) return 0;
-
-  debug ("read", "process[%ld] state '%s'", pid, token);
-
-  for (i = 1; i <= MAX_POS; i++)
-    {
-      switch (i)
-	{
-	case PID_POS:
-	  if (sscanf (token, "%ld", &tmp) != 1) return 0;
-	  if (tmp != pid) return 0;
-	  break;
-	case PPID_POS:
-	  if (sscanf (token, "%ld", &ppid) != 1) return 0;
-	  if (ppid < 0) return 0;
-	  if (ppid >= pid_max) return 0;
-	  break;
-	case PGID_POS:
-	  if (sscanf (token, "%ld", &tmp) != 1) return 0;
-	  if (tmp != group_pid) return 0;
-	  break;
-	case SESSION_POS:
-	  if (sscanf (token, "%ld", &tmp) != 1) return 0;
-	  if (tmp != session_pid) return 0;
-	  break;
-	case UTIME_POS:
-	  if (sscanf (token, "%ld", &utime) != 1) return 0;
-	  if (utime < 0) return 0;
-	  break;
-	case STIME_POS:
-	  if (sscanf (token, "%ld", &stime) != 1) return 0;
-	  if (stime < 0) return 0;
-	  break;
-	case RSS_POS:
-	  if (sscanf (token, "%ld", &rss) != 1) return 0;
-	  if (rss < 0) return 0;
-	  break;
-	default:
-	  break;
-	}
-
-      if (i + 1 == COMM_POS)
-	token = comm;
-      else if (i == COMM_POS)
-	token = strtok (after_comm, " ");
-      else
-	token = strtok (0, " ");
-
-      if (!token) return 0;
-    }
-
-  debug ("utime", "%f microseconds", utime);
-  debug ("stime", "%f microseconds", stime);
-  time = (utime + stime) / (double) clock_ticks;
-  memory = rss * memory_per_page;
-
-  add_process (pid, ppid, time, memory);
-  return 1;
-}
-
-#else
-
 #ifndef NDEBUG
 static int parsed;
 #endif
@@ -761,8 +661,6 @@ read_process (long pid)
   add_process (pid, ppid, time, memory);
   return 1;
 }
-
-#endif
 
 /*------------------------------------------------------------------------*/
 

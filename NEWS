@@ -1,6 +1,7 @@
-News for Version 1.18
+News for Version 1.19
 ---------------------
 
+- better 'read_process' (finds more descendants)
 - automatically try to remount '/proc' file system
 
 News for Version 1.13

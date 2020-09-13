@@ -561,6 +561,8 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
 
 /*------------------------------------------------------------------------*/
 
+#if 0
+
 static int
 read_process (long pid)
 {
@@ -598,6 +600,8 @@ read_process (long pid)
 
   token = strtok (buffer, " ");
   if (!token) return 0;
+
+  debug ("read", "process[%ld] state '%s'", pid, token);
 
   for (i = 1; i <= MAX_POS; i++)
     {
@@ -654,6 +658,111 @@ read_process (long pid)
   add_process (pid, ppid, time, memory);
   return 1;
 }
+
+#else
+
+#ifndef NDEBUG
+static int parsed;
+#endif
+
+#define FAILED \
+do { \
+  fclose (file); \
+  return 0; \
+} while (0)
+
+#define READ(POS,TYPE,NAME,FMT) \
+  TYPE NAME; \
+  do { \
+    if (fscanf (file, FMT, &NAME) != 1) \
+      FAILED; \
+    assert (++parsed == (POS)); \
+  } while (0)
+
+#define IGNR(POS,TYPE,NAME,FMT) \
+  do { \
+    TYPE NAME; \
+    if (fscanf (file, FMT, &NAME) != 1) \
+      FAILED; \
+    (void) NAME; \
+    assert (++parsed == (POS)); \
+  } while (0)
+
+#define COMM(POS) \
+do { \
+  if (getc (file) != ' ') \
+    FAILED; \
+  if (getc (file) != '(') \
+    FAILED; \
+  int ch; \
+  while ((ch = getc (file)) != ')') \
+    if (ch == EOF) \
+      FAILED; \
+  assert (++parsed == (POS)); \
+} while (0)
+
+static int
+read_process (long pid)
+{
+  char path[64];
+  FILE *file;
+  sprintf (path, "/proc/%ld/stat", pid);
+  file = fopen (path, "r");
+  if (!file)
+    return 0;
+#ifndef NDEBUG
+  parsed = 0;
+#endif
+  READ (1, int, rid, "%d");
+  if (rid != pid)
+    FAILED;
+  COMM (2);
+  if (getc (file) != ' ')
+    FAILED;
+  IGNR (3, char, state, "%c");
+  READ (4, int, ppid, "%d");
+  if (ppid >= pid_max)
+    FAILED;
+  READ (5, int, pgrp, "%d");
+  if (pgrp != pid && pgrp != parent_pid && pgrp != group_pid)
+    FAILED;
+  READ (6, int, session, "%d");
+  if (session != session_pid)
+    FAILED;
+  IGNR (7, int, tty_nr, "%d");
+  IGNR (8, int, tpgid, "%d");
+  IGNR (9, unsigned int, flags, "%u");
+  IGNR (10, unsigned long, minflt, "%lu");
+  IGNR (11, unsigned long, cminflt, "%lu");
+  IGNR (12, unsigned long, majflt, "%lu");
+  IGNR (13, unsigned long, cmajflt, "%lu");
+  READ (14, unsigned long, utime, "%lu");
+  if (utime < 0)
+    FAILED;
+  READ (15, unsigned long, stime, "%lu");
+  if (stime < 0)
+    FAILED;
+  IGNR (16, long, cutime, "%ld");
+  IGNR (17, long, cstime, "%ld");
+  IGNR (18, long, priority, "%ld");
+  IGNR (19, long, nice, "%ld");
+  IGNR (20, long, num_threads, "%ld");
+  IGNR (21, long, itrealvalue, "%ld");
+  IGNR (22, unsigned long long, starttime, "%llu");
+  IGNR (23, unsigned long, vsize, "%lu");
+  READ (24, long, rss, "%ld");
+  if (rss < 0)
+    FAILED;
+  fclose (file);
+  debug ("utime", "%f microseconds", utime);
+  debug ("stime", "%f microseconds", stime);
+  const double time = (utime + stime) / (double) clock_ticks;
+  const double memory = rss * memory_per_page;
+  add_process (pid, ppid, time, memory);
+  return 1;
+}
+
+#endif
 
 /*------------------------------------------------------------------------*/
 

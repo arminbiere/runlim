@@ -72,10 +72,11 @@ struct Process
   long sampled;
   double time;
   double memory;
-  Process * next;
-  Process * child;
+  Process * next_process;
+  Process * first_child;
+  Process * last_child;
   Process * parent;
-  Process * sibbling;
+  Process * next_sibbling;
 };
 
 /*------------------------------------------------------------------------*/
@@ -539,10 +540,10 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
       p->ppid = ppid;
       p->time = time;
       p->memory = memory;
-      p->next = 0;
+      p->next_process = 0;
 
       if (last_active_process)
-	last_active_process->next = p;
+	last_active_process->next_process = p;
       else
 	{
 	  assert (!active_processes);
@@ -624,10 +625,10 @@ read_process (long pid)
   if (ppid >= pid_max)
     FAILED;
   READ (5, int, pgrp, "%d");
-  if (pgrp != pid && pgrp != parent_pid && pgrp != group_pid)
-    FAILED;
   READ (6, int, session, "%d");
-  if (session != session_pid)
+  debug ("read", "pid=%d ppid=%d pgrp=%d session=%d", pid, ppid, pgrp, session);
+  if (pgrp != pid && pgrp != parent_pid &&
+      pgrp != group_pid && session != session_pid)
     FAILED;
   IGNR (7, int, tty_nr, "%d");
   IGNR (8, int, tpgid, "%d");
@@ -730,7 +731,7 @@ find_process (long pid)
 static void
 clear_tree_connections (Process * p)
 {
-  p->parent = p->child = p->sibbling = 0;
+  p->parent = p->first_child = p->last_child = p->next_sibbling = 0;
 }
 
 static void
@@ -739,7 +740,7 @@ connect_process_tree (void)
   Process * p, * parent;
   long connected = 0;
 
-  for (p = active_processes; p; p = p->next)
+  for (p = active_processes; p; p = p->next_process)
     {
       assert (p->active);
       assert (find_process (p->pid) == p);
@@ -748,14 +749,23 @@ connect_process_tree (void)
       clear_tree_connections (p);
     }
 
-  for (p = active_processes; p; p = p->next)
+  for (p = active_processes; p; p = p->next_process)
     {
       if (p->pid == child_pid) continue;
       assert (p->pid != parent_pid);
       parent = find_process (p->ppid);
       p->parent = parent;
-      if (parent->child) parent->child->sibbling = p;
-      else parent->child = p;
+      if (parent->first_child) {
+	assert (parent->last_child);
+	assert (!parent->last_child->next_sibbling);
+	parent->last_child->next_sibbling = p;
+	parent->last_child = p;
+	assert (!p->next_sibbling);
+      } else {
+	assert (!parent->last_child);
+        parent->first_child = parent->last_child = p;
+	assert (!p->next_sibbling);
+      }
       debug ("connect", "%d -> %d", p->ppid, p->pid);
       connected++;
     }
@@ -781,7 +791,7 @@ flush_inactive_processes (void)
     {
       assert (p->active);
 
-      next = p->next;
+      next = p->next_process;
 
       if (p->sampled == num_samples)
 	{
@@ -792,13 +802,13 @@ flush_inactive_processes (void)
 	  p->active = 0;
 
 	  if (prev)
-	    prev->next = next;
+	    prev->next_process = next;
 	  else
 	    active_processes = next;
 
 	  debug ("deactive", "%d (%.3f sec)", p->pid, p->time);
 	  accumulated_time += p->time;
-	  p->next = 0;
+	  p->next_process = 0;
 	  res++;
 	}
     }
@@ -850,7 +860,7 @@ sample_recursively (Process * p)
 
   p->cyclic_sampling = 1;
 
-  for (child = p->child; child; child = child->sibbling)
+  for (child = p->first_child; child; child = child->next_sibbling)
     res += sample_recursively (child);
 
   assert (p->cyclic_sampling);
@@ -895,7 +905,7 @@ kill_recursively (Process * p, void(*killer)(Process *))
     return 0;
 
   p->cyclic_killing = 1;
-  for (child = p->child; child; child = child->sibbling)
+  for (child = p->first_child; child; child = child->next_sibbling)
     res += kill_recursively (child, killer);
   assert (p->cyclic_killing);
   p->cyclic_killing = 0;
@@ -995,7 +1005,7 @@ void print_process_tree (Process * p)
 {
   Process * c;
   debug ("edge", "%d -> %d", p->ppid, p->pid);
-  for (c = p->child; c; c = c->sibbling)
+  for (c = p->first_child; c; c = c->next_sibbling)
     print_process_tree (c);
 }
 

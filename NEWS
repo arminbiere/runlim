@@ -1,6 +1,8 @@
 News for Version 1.20
 ---------------------
 
+- renamed 'remount' as 'runlim-remount-proc'
+
 - fixed process tree insertion
 
 - better 'read_process' (finds more descendants)

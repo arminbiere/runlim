@@ -46,7 +46,7 @@ then
   esac
 fi
 VERSION="`cat VERSION`"
-COMPILE="$COMPILE -DVERSION=$VERSION"
+COMPILE="$COMPILE -DVERSION=\\\\\"$VERSION\\\\\""
 if [ -f /proc/sys/kernel/pid_max ]
 then
   PID_MAX=`cat /proc/sys/kernel/pid_max`

@@ -1282,7 +1282,7 @@ main (int argc, char **argv)
 	  else if (strcmp (argv[i], "-v") == 0 ||
 	           strcmp (argv[i], "--version") == 0)
 	    {
-	      printf ("%g\n", VERSION);
+	      printf ("%s\n", VERSION);
 	      fflush (stdout);
 	      exit (0);
 	    }
@@ -1316,7 +1316,7 @@ main (int argc, char **argv)
   if (i >= argc)
     error ("no program specified (try '-h')");
 
-  message ("version", "%g", VERSION);
+  message ("version", "%s", VERSION);
   message ("host", "%s", read_host_name ());
   message ("time limit", "%.0f seconds", time_limit);
   message ("real time limit", "%.0f seconds", real_time_limit);

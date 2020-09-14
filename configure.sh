@@ -11,7 +11,10 @@ msg () {
 while [ $# -gt 0 ]
 do
   case "$1" in
-    -h|--help) echo "usage: configure.sh [-h|--help|-g]"; exit 0;;
+    -h|--help)
+      echo "usage: configure.sh [-h|--help|-g|--prefix=<install-dir>]"
+      exit 0
+      ;;
     -g) debug=yes;;
     --prefix=*)
       prefix=`echo "$1"|sed -e 's,^--prefix=,,'`

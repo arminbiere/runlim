@@ -4,8 +4,8 @@ runlim: runlim.c makefile
 runlim-remount-proc: runlim-remount-proc.c makefile
 	@COMPILE@ -o runlim-remount-proc runlim-remount-proc.c
 install: all
-	install -s -m 755 runlim @PREFIX@/runlim
-	install -s -m 4755 runlim-remount-proc @PREFIX@/runlim-remount-proc
+	install -s -m 755 runlim @PREFIX@/
+	install -s -m 4755 runlim-remount-proc @PREFIX@/
 clean:
 	rm -f runlim runlim-remount-proc
 .PHONY: all clean install

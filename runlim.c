@@ -117,6 +117,9 @@ struct Process
 "  --kill                     propagate signals\n" \
 "  -k\n" \
 "\n" \
+"  --propagate                propagate exit code\n" \
+"  -p\n" \
+"\n" \
 "The program is the name of an executable followed by its arguments.\n"
 
 /*------------------------------------------------------------------------*/
@@ -470,6 +473,7 @@ static double max_memory;
 
 static int single;
 static int propagate_signals;
+static int propagate_exit_code;
 static int children;
 
 /*------------------------------------------------------------------------*/
@@ -1300,6 +1304,11 @@ main (int argc, char **argv)
 	    {
 	      propagate_signals = 1;
 	    }
+	  else if (strcmp (argv[i], "-p") == 0 ||
+	           strcmp (argv[i], "--propagate") == 0)
+	    {
+	      propagate_exit_code = 1;
+	    }
 	  else if (strcmp (argv[i], "-h") == 0 ||
 	           strcmp (argv[i], "--help") == 0)
 	    {
@@ -1436,7 +1445,8 @@ main (int argc, char **argv)
     {
     case OK:
       description = "ok";
-      res = 0;
+      if (!propagate_exit_code)
+	res = 0;
       break;
     case OUT_OF_TIME:
 FORCE_OUT_OF_TIME_ENTRY:

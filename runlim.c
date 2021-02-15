@@ -1191,6 +1191,7 @@ main (int argc, char **argv)
 	      case 'd':
 	      case 'h':
 	      case 'k':
+	      case 'p':
 	        continue;
 
 	      case '-':

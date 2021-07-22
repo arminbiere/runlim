@@ -3,5 +3,5 @@
 int
 main (void)
 {
-  return mount ("proc", "/proc", "proc", 0, "defaults");
+  return mount ("proc", "/proc", "proc", 0, 0);
 }

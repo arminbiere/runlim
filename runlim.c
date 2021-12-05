@@ -1,7 +1,8 @@
 /*------------------------------------------------------------------------*\
 
-Copyright (c) 2000-2004 Armin Biere, ETH Zurich.
+Copyright (c) 2021 Armin Biere, University of Freiburg.
 Copyright (c) 2005-2020 Armin Biere, Johannes Kepler University.
+Copyright (c) 2000-2004 Armin Biere, ETH Zurich.
 Copyright (c) 2007 Toni Jussila, Johannes Kepler University.
 
 See LICENSE for restrictions on using this software.
@@ -468,6 +469,8 @@ static long num_samples_since_last_report;
 
 static double max_time;
 static double max_memory;
+
+static double max_load;
 
 /*------------------------------------------------------------------------*/
 
@@ -996,10 +999,11 @@ real_time (void)
 /*------------------------------------------------------------------------*/
 
 static void
-report (double time, double memory)
+report (double time, double memory, double load)
 {
   double real = real_time ();
-  message ("sample", "%.2f time, %.2f real, %.0f MB", time, real, memory);
+  message ("sample", "%.2f time, %.2f real, %.0f MB, %.2f load",
+           time, real, memory, load);
   num_reports++;
 }
 
@@ -1015,6 +1019,20 @@ void print_process_tree (Process * p)
 
 /*------------------------------------------------------------------------*/
 
+static double
+sample_load (void)
+{
+  double load;
+  int res = getloadavg (&load, 1);
+  if (res != 1)
+    return 0;
+  if (load > max_load)
+    max_load = load;
+  return load;
+}
+
+/*------------------------------------------------------------------------*/
+
 static long sample_rate = SAMPLE_RATE;
 static long report_rate = REPORT_RATE;
 
@@ -1022,6 +1040,7 @@ static void
 sample_all_child_processes (int s)
 {
   long sampled, read;
+  double load;
   Process * p;
   int ignore;
 
@@ -1033,6 +1052,8 @@ sample_all_child_processes (int s)
   pthread_mutex_unlock (&mutex);
   
   if (ignore) return;
+
+  load = sample_load ();
 
   num_samples++;
 
@@ -1069,7 +1090,7 @@ sample_all_child_processes (int s)
       if (sampled > 0)
 	{
 	  print_process_tree (find_process (child_pid));
-	  report (sampled_time, sampled_memory);
+	  report (sampled_time, sampled_memory, load);
 	}
     }
 
@@ -1491,6 +1512,7 @@ FORCE_OUT_OF_TIME_ENTRY:
   message ("real", "%.2f seconds", real);
   message ("time", "%.2f seconds", max_time);
   message ("space", "%.0f MB", max_memory);
+  message ("load","%.2f maximum", max_load);
   message ("samples", "%ld", num_samples);
   debug ("reports", "%ld", num_samples);
 

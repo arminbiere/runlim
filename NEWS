@@ -1,6 +1,8 @@
 News for Version 1.23
 ---------------------
 
+- report current load and maximum load
+
 - better default mount options in 'runlim-remount-proc'
 
 News for Version 1.22

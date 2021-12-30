@@ -462,9 +462,9 @@ static double space_limit;
 
 /*------------------------------------------------------------------------*/
 
-static Process * process_hash_table;
+static Process ** process_hash_table;
 static size_t size_of_process_hash_table;
-static size_t elements_in_process_hash_table;
+static size_t processes;
 
 #define PRIME1 10007
 #define PRIME2 27
@@ -478,7 +478,7 @@ static size_t hash_process_id (int pid)
 
 static int is_power_of_two (size_t n)
 {
-  return n && (n & (n-1));
+  return n && !(n & (n-1));
 }
 
 #endif
@@ -489,18 +489,13 @@ static size_t mod_size_of_process_hash_table (size_t n)
   return n & (size_of_process_hash_table - 1);
 }
 
-static Process *
+static Process **
 look_up_process_in_process_hash_table (int pid)
 {
   size_t hash, pos;
-  Process * res;
+  Process ** res, * process;
 
-  assert (pid);
-
-  if (!elements_in_process_hash_table)
-    return 0;
-
-  assert (size_of_process_hash_table > elements_in_process_hash_table);
+  assert (size_of_process_hash_table > processes);
 
   hash = hash_process_id (pid);
   pos = mod_size_of_process_hash_table (hash);
@@ -508,89 +503,78 @@ look_up_process_in_process_hash_table (int pid)
   for (;;)
     {
       res = process_hash_table + pos;
-      if (!res->pid)
-	return 0;
-      if (res->pid == pid)
+      process = *res;
+      if (!process)
+	return res;
+      if (process->pid == pid)
 	return res;
       pos = mod_size_of_process_hash_table (pos + PRIME2);
     }
 }
 
-static Process *
-insert_process (int pid)
-{
-  size_t hash, pos;
-  Process * res;
-
-  assert (id);
-
-  hash = hash_process_id (pid);
-  pos = mod_size_of_process_hash_table (hash);
-
-  for (;;)
-    {
-      res = process_hash_table + pos;
-      if (!res->pid)
-	break;
-      pos = mod_size_of_process_hash_table (pos + PRIME2);
-    }
-
-  res->pid = pid;
-  elements_in_process_hash_table++;
-
-  return res;
-}
-
 static void
 resize_process_hash_table (void)
 {
-  Process *  old_process_hash_table, * src, * dst;
+  Process **  old_process_hash_table, * process, ** p;
   size_t old_size_of_process_hash_table, pos;
-#ifndef NDEBUG
-  size_t saved;
-#endif
+  int pid;
 
   old_size_of_process_hash_table = size_of_process_hash_table;
   old_process_hash_table = process_hash_table;
 
   size_of_process_hash_table = 2*old_size_of_process_hash_table;
   if (!size_of_process_hash_table)
-    size_of_process_hash_table++;
+    size_of_process_hash_table = 2;
+
+  debug ("resize", "%zu", size_of_process_hash_table);
 
   process_hash_table =
     calloc (size_of_process_hash_table, sizeof (Process));
   if (!process_hash_table)
     error ("could not resize process hash table");
 
-#ifndef NDEBUG
-  saved = elements_in_process_hash_table;
-#endif
-  elements_in_process_hash_table = 0;
-
   for (pos = 0; pos < old_size_of_process_hash_table; pos++)
     {
-      src = old_process_hash_table + pos;
-      if (!src->pid)
+      process = old_process_hash_table[pos];
+      if (!process)
 	continue;
-      dst = insert_process (src->pid);
-      *dst = *src;
+      pid = process->pid;
+      p = look_up_process_in_process_hash_table (pid);
+      *p = process;
     }
-  assert (saved == elements_in_process_hash_table);
+  free (old_process_hash_table);
 }
 
 static Process *
-find_process (int id)
+find_process (int pid)
 {
-  Process * res = look_up_process_in_process_hash_table (id);
+  Process * res, ** p;
 
-  if (res)
-    return res;
-
-  if (elements_in_process_hash_table/2 >= size_of_process_hash_table)
+  if (processes >= size_of_process_hash_table/2)
     resize_process_hash_table ();
 
-  res = insert_process (id);
-  assert (res == look_up_process_in_process_hash_table (id));
+  p = look_up_process_in_process_hash_table (pid);
+  assert (p);
+  res = *p;
+
+  res = *p;
+  if (res)
+    {
+      assert (res->pid == pid);
+      return res;
+    }
+
+  debug ("insert", "%d", pid);
+
+  res = malloc (sizeof * res);
+  if (!res)
+    error ("could not allocate process data");
+
+  memset (res, 0, sizeof *res);
+  res->pid = pid;
+
+  *p = res;
+  processes++;
 
   return res;
 }
@@ -1589,6 +1573,7 @@ FORCE_OUT_OF_TIME_ENTRY:
   message ("status", description);
   message ("result", "%d", res);
   message ("children", "%d", children);
+  message ("processes", "%d", processes);
   message ("real", "%.2f seconds", real);
   message ("time", "%.2f seconds", max_time);
   message ("space", "%.0f MB", max_memory);
@@ -1605,6 +1590,15 @@ FORCE_OUT_OF_TIME_ENTRY:
 
   if (buffer)
     free (buffer);
+
+  if (process_hash_table)
+    {
+      for (size_t pos = 0; pos < size_of_process_hash_table; pos++)
+	if (process_hash_table[pos])
+	  free (process_hash_table[pos]);
+
+      free (process_hash_table);
+    }
 
   restore_signal_handlers ();
 

@@ -36,12 +36,6 @@ See LICENSE for restrictions on using this software.
 
 /*------------------------------------------------------------------------*/
 
-#ifndef PID_MAX			/* usually set by 'configure.sh' */
-#define PID_MAX 32768		/* default on Linux it seems */
-#endif
-
-/*------------------------------------------------------------------------*/
-
 typedef struct Process Process;
 typedef enum Status Status;
 
@@ -379,47 +373,13 @@ read_host_name ()
   return buffer;
 }
 
-static long
-read_pid_max ()
-{
-  const char * pid_max_path = "/proc/sys/kernel/pid_max";
-  FILE * file;
-  long res;
-
-  file = open_proc_file_path_for_reading (pid_max_path);
-
-  if (fscanf (file, "%ld", &res) != 1)
-    error ("failed to read maximum process id from '%s'", pid_max_path);
-
-  if (res < 32768)
-    error ("tiny maximum process id '%ld' in '%s'", res, pid_max_path);
-
-  if (res > (1l << 22))
-    error ("huge maximum process id '%ld' in '%s'", res, pid_max_path);
-
-  if (fclose (file))
-    warning ("failed to close file '%s'", pid_max_path);
-
-  return res;
-}
-
 /*------------------------------------------------------------------------*/
 
-static long pid_max;
 static long page_size;
 static long clock_ticks;
 
 static double memory_per_page;
 static double physical_memory;
-
-static void
-get_pid_max ()
-{
-  pid_max = read_pid_max ();
-  if (pid_max <= PID_MAX) return;
-  error ("maximum process id '%ld' exceeds limit '%ld' (recompile)",
-    pid_max, (long) PID_MAX);
-}
 
 static void
 get_page_size ()
@@ -502,7 +462,141 @@ static double space_limit;
 
 /*------------------------------------------------------------------------*/
 
-static Process process[PID_MAX];
+static Process * process_hash_table;
+static size_t size_of_process_hash_table;
+static size_t elements_in_process_hash_table;
+
+#define PRIME1 10007
+#define PRIME2 27
+
+static size_t hash_process_id (int pid)
+{
+  return PRIME1 * (size_t) pid;
+}
+
+#ifndef NDEBUG
+
+static int is_power_of_two (size_t n)
+{
+  return n && (n & (n-1));
+}
+
+#endif
+
+static size_t mod_size_of_process_hash_table (size_t n)
+{
+  assert (is_power_of_two (size_of_process_hash_table));
+  return n & (size_of_process_hash_table - 1);
+}
+
+static Process *
+look_up_process_in_process_hash_table (int pid)
+{
+  size_t hash, pos;
+  Process * res;
+
+  assert (pid);
+
+  if (!elements_in_process_hash_table)
+    return 0;
+
+  assert (size_of_process_hash_table > elements_in_process_hash_table);
+
+  hash = hash_process_id (pid);
+  pos = mod_size_of_process_hash_table (hash);
+
+  for (;;)
+    {
+      res = process_hash_table + pos;
+      if (!res->pid)
+	return 0;
+      if (res->pid == pid)
+	return res;
+      pos = mod_size_of_process_hash_table (pos + PRIME2);
+    }
+}
+
+static Process *
+insert_process (int pid)
+{
+  size_t hash, pos;
+  Process * res;
+
+  assert (id);
+
+  hash = hash_process_id (pid);
+  pos = mod_size_of_process_hash_table (hash);
+
+  for (;;)
+    {
+      res = process_hash_table + pos;
+      if (!res->pid)
+	break;
+      pos = mod_size_of_process_hash_table (pos + PRIME2);
+    }
+
+  res->pid = pid;
+  elements_in_process_hash_table++;
+
+  return res;
+}
+
+static void
+resize_process_hash_table (void)
+{
+  Process *  old_process_hash_table, * src, * dst;
+  size_t old_size_of_process_hash_table, pos;
+#ifndef NDEBUG
+  size_t saved;
+#endif
+
+  old_size_of_process_hash_table = size_of_process_hash_table;
+  old_process_hash_table = process_hash_table;
+
+  size_of_process_hash_table = 2*old_size_of_process_hash_table;
+  if (!size_of_process_hash_table)
+    size_of_process_hash_table++;
+
+  process_hash_table =
+    calloc (size_of_process_hash_table, sizeof (Process));
+  if (!process_hash_table)
+    error ("could not resize process hash table");
+
+#ifndef NDEBUG
+  saved = elements_in_process_hash_table;
+#endif
+  elements_in_process_hash_table = 0;
+
+  for (pos = 0; pos < old_size_of_process_hash_table; pos++)
+    {
+      src = old_process_hash_table + pos;
+      if (!src->pid)
+	continue;
+      dst = insert_process (src->pid);
+      *dst = *src;
+    }
+  assert (saved == elements_in_process_hash_table);
+}
+
+static Process *
+find_process (int id)
+{
+  Process * res = look_up_process_in_process_hash_table (id);
+
+  if (res)
+    return res;
+
+  if (elements_in_process_hash_table/2 >= size_of_process_hash_table)
+    resize_process_hash_table ();
+
+  res = insert_process (id);
+  assert (res == look_up_process_in_process_hash_table (id));
+
+  return res;
+}
+
+/*------------------------------------------------------------------------*/
+
 static Process * active_processes;
 static Process * last_active_process;
 
@@ -516,11 +610,9 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
   Process * p;
 
   assert (0 < pid);
-  assert (pid < pid_max);
   assert (0 <= ppid); 
-  assert (ppid < pid_max);
 
-  p = process + pid;
+  p = find_process (pid);
   
   if (p->active)
     {
@@ -629,8 +721,6 @@ read_process (long pid)
     FAILED;
   IGNR (3, char, state, "%c");
   READ (4, int, ppid, "%d");
-  if (ppid >= pid_max)
-    FAILED;
   READ (5, int, pgrp, "%d");
   READ (6, int, session, "%d");
   debug ("read", "pid=%d ppid=%d pgrp=%d session=%d", pid, ppid, pgrp, session);
@@ -710,7 +800,6 @@ read_all_processes (void)
     {
       if (!is_positive_long (de->d_name, &pid)) continue;
       if (pid <= 0) continue;
-      if (pid >= pid_max) continue;
       if (pid == parent_pid) continue;
       if (read_process (pid)) res++;
     }
@@ -725,14 +814,6 @@ static long
 read_processes (void) {
   if (single) return read_process (child_pid);
   else return read_all_processes ();
-}
-
-static Process *
-find_process (long pid)
-{
-  assert (0 <= pid);
-  assert (pid < pid_max);
-  return process + pid;
 }
 
 static void
@@ -1243,7 +1324,6 @@ main (int argc, char **argv)
 	break;
     }
 
-  get_pid_max ();
   get_page_size ();
   get_physical_memory ();
   get_clock_ticks ();

@@ -1,9 +1,13 @@
-News for Version 1.23
----------------------
+News for Version 2.0.0
+----------------------
+
+- internal hash table for process
 
 - report current load and maximum load
 
 - better default mount options in 'runlim-remount-proc'
+
+- semantical version numbering scheme
 
 News for Version 1.22
 ---------------------

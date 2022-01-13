@@ -1546,8 +1546,6 @@ main (int argc, char **argv)
     {
     case OK:
       description = "ok";
-      if (!propagate_exit_code)
-	res = 0;
       break;
     case OUT_OF_TIME:
 FORCE_OUT_OF_TIME_ENTRY:
@@ -1595,6 +1593,9 @@ FORCE_OUT_OF_TIME_ENTRY:
   message ("load","%.2f maximum", max_load);
   message ("samples", "%ld", num_samples);
   debug ("reports", "%ld", num_samples);
+
+  if (ok == OK && !propagate_exit_code)
+    res = 0;
 
   if (close_log)
     {

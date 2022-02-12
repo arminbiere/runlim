@@ -992,7 +992,7 @@ static void
 kill_all_child_processes (void)
 {
   static void (*killer) (Process *);
-  long ms = 16000;
+  long ms = 512 * 1000;
   long rounds = 0;
   Process * p;
   long killed;

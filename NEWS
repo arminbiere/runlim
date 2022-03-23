@@ -13,6 +13,9 @@ News for Version 2.0.0
 
 - semantical version numbering scheme
 
+- TAI-based time, i.e. changes to the system time (NTP or 
+  daylight saving time) cannot influence a running benchmark
+
 News for Version 1.22
 ---------------------
 

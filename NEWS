@@ -4,6 +4,7 @@ News for Version 2.0.0
 - longer grace period before killing the process again
 
 - internal hash table for processes
+  (removes compile time dependency on maximum process ID)
 
 - report current load and maximum load
 

@@ -1,3 +1,2 @@
-- hash pids ...
-- sample and report temporary disk space
-- sample and report CPU load
+- sample temporary disk space
+- virtual limited '/tmp/' directory with 'unshare' (see 'man 2 unshare')

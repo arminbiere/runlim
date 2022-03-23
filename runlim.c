@@ -449,6 +449,7 @@ static int children;
 /*------------------------------------------------------------------------*/
 
 static double start_time;
+static double start_time_tai;
 static double time_limit;
 static double real_time_limit;
 static double space_limit;
@@ -1035,10 +1036,23 @@ wall_clock_time (void)
 {
   double res = -1;
   struct timeval tv;
-  if (!gettimeofday (&tv, 0))
+  if (!gettimeofday(&tv, 0))
     {
       res = 1e-6 * tv.tv_usec;
       res += tv.tv_sec;
+    }
+  return res;
+}
+
+static double
+tai_time (void)
+{
+  double res = -1;
+  struct timespec ts;
+  if (!clock_gettime(CLOCK_TAI, &ts))
+    {
+      res = 1e-9 * ts.tv_nsec;
+      res += ts.tv_sec;
     }
   return res;
 }
@@ -1049,8 +1063,8 @@ static double
 real_time (void) 
 {
   double res;
-  if (start_time < 0) return -1;
-  res = wall_clock_time() - start_time;
+  if (start_time_tai < 0) return -1;
+  res = tai_time() - start_time_tai;
   return res;
 }
 
@@ -1422,6 +1436,7 @@ main (int argc, char **argv)
 
   (void) signal (SIGUSR1, sig_usr1_handler);
 
+  start_time_tai = tai_time();
   start_time = wall_clock_time();
 
   parent_pid = getpid ();
@@ -1524,8 +1539,6 @@ main (int argc, char **argv)
     {
     case OK:
       description = "ok";
-      if (!propagate_exit_code)
-	res = 0;
       break;
     case OUT_OF_TIME:
 FORCE_OUT_OF_TIME_ENTRY:
@@ -1573,6 +1586,9 @@ FORCE_OUT_OF_TIME_ENTRY:
   message ("load","%.2f maximum", max_load);
   message ("samples", "%ld", num_samples);
   debug ("reports", "%ld", num_samples);
+
+  if (ok == OK && !propagate_exit_code)
+    res = 0;
 
   if (close_log)
     {

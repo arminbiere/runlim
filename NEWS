@@ -2,6 +2,7 @@ News for Version 2.0.0
 ----------------------
 
 - longer grace period before killing the process again
+  (added to allow solvers to dump state after being killed)
 
 - internal hash table for processes
   (removes compile time dependency on maximum process ID)

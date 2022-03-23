@@ -1,3 +1,5 @@
+# Runlim
+
 This Linux program can be used to run and monitor benchmarks
 under resource limits (time and memory usage).
 
@@ -9,12 +11,12 @@ In order to support multi-threaded programs a limit on the
 wall clock time can be given as well.
 
 Note, that for multi-threaded programs the time spent in each
-thread is accumulated by commands like 'time'.  This is the
+thread is accumulated by commands like `time`.  This is the
 same model we use for multiple processes forked by a program
 unless you are only interested in walk clock time.
 
 To compile:
 
-  ./configure.sh && make
+> `./configure.sh && make`
 
-Also see LICENSE.
+Also see [LICENSE](LICENSE).

@@ -1,4 +1,5 @@
-This Linux program can be used to 'runlim' and control benchmarks.
+This Linux program can be used to run and monitor benchmarks
+under resource limits (time and memory usage).
 
 It samples the resource usage of the executed program and
 all its child processes and stops the program if resource

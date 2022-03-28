@@ -16,7 +16,5 @@ jobs:
       run: ./configure.sh
     - name: make
       run: make -j
-    - name: make tests
-      run: make tests -j
-    - name: execute tests in junit format
-      run: ./tests --reporter junit
+    - name: make check
+      run: make check

@@ -54,7 +54,8 @@ TEST_CASE("Launch 'r' program and kill it after 1s") {
   REQUIRE(stoi(properties["result"]) == retcode);
   REQUIRE(stoi(properties["real"]) < 1 + grace_period);
   REQUIRE(stoi(properties["samples"]) == 10);
-  REQUIRE(stoi(properties["children"]) == 2);
+  REQUIRE(
+    (stoi(properties["children"]) == 2 || stoi(properties["children"]) == 3));
 
   search_for_pid_and_check("(r)", str, properties);
 }
@@ -72,7 +73,8 @@ TEST_CASE("Launch 'r' program and kill it after 0s") {
   REQUIRE(stoi(properties["result"]) == retcode);
   REQUIRE(stoi(properties["real"]) < grace_period);
   REQUIRE(stoi(properties["samples"]) == 1);
-  REQUIRE(stoi(properties["children"]) == 2);
+  REQUIRE(
+    (stoi(properties["children"]) == 2 || stoi(properties["children"]) == 3));
 
   search_for_pid_and_check("(r)", str, properties);
 }
@@ -90,7 +92,8 @@ TEST_CASE("Launch 'q' program and kill it after 0s") {
   REQUIRE(stoi(properties["result"]) == retcode);
   REQUIRE(stoi(properties["real"]) < grace_period);
   REQUIRE(stoi(properties["samples"]) == 1);
-  REQUIRE(stoi(properties["children"]) == 2);
+  REQUIRE(
+    (stoi(properties["children"]) == 2 || stoi(properties["children"]) == 3));
 
   search_for_pid_and_check("(q)", str, properties);
 }

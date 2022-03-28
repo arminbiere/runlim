@@ -1,3 +1,7 @@
 makefile
 runlim
 runlim-remount-proc
+*.o
+compile_commands.json
+.cache
+tests

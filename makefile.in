@@ -1,11 +1,19 @@
 all: runlim runlim-remount-proc
 runlim: runlim.c makefile
 	@COMPILE@ -o runlim runlim.c -lpthread
-runlim-remount-proc: runlim-remount-proc.c makefile
-	@COMPILE@ -o runlim-remount-proc runlim-remount-proc.c
+%: %.c makefile
+	@COMPILE@ -o $@ $<
 install: all
 	install -s -m 755 runlim @PREFIX@/
 	install -s -m 4755 runlim-remount-proc @PREFIX@/
+
+tests: all test/r test/q test/p test/m test/test_main.o test/test_launches.o test/test_helpers.o
+	g++ -std=c++17 -o $@ test/test_main.o test/test_launches.o test/test_helpers.o
+%.o: %.cpp makefile
+	g++ -std=c++17 -c -o $@ $<
+check: tests
+	./tests
+
 clean:
-	rm -f runlim runlim-remount-proc
-.PHONY: all clean install
+	rm -f runlim runlim-remount-proc test/r test/r test/p test/m test/*.o tests
+.PHONY: all clean install check

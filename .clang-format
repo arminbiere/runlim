@@ -1,18 +1,21 @@
----
-BasedOnStyle: Mozilla
-AccessModifierOffset: '0'
-AlignEscapedNewlinesLeft: 'true'
-AlignOperands: 'true'
-AlignTrailingComments: 'true'
-AllowShortBlocksOnASingleLine: 'false'
-SortIncludes: 'true'
-SpaceBeforeParens: Never
-SpaceInEmptyParentheses: 'false'
-SpacesBeforeTrailingComments: '0'
-Standard: Cpp11
-TabWidth: '2'
-UseTab: Never
-BreakBeforeBraces: Custom
+BasedOnStyle: GNU
+AlignEscapedNewlines: DontAlign
+AlignOperands: false
+AllowShortEnumsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: true
 BraceWrapping:
-  AfterExternBlock: false
-...
+  AfterControlStatement: true
+  AfterFunction: true
+  AfterStruct: true
+  BeforeElse: true
+  IndentBraces: true
+BreakBeforeBinaryOperators: None
+BreakBeforeBraces: Custom
+ColumnLimit: 0
+ContinuationIndentWidth: 2
+DerivePointerAlignment: false
+IndentGotoLabels: false
+PointerAlignment: Middle
+SpaceAfterCStyleCast: true
+TabWidth: 8
+UseTab: Always

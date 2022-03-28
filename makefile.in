@@ -14,6 +14,9 @@ tests: all test/r test/q test/p test/m test/test_main.o test/test_launches.o tes
 check: tests
 	./tests
 
+indent:
+	indent *.[ch] test/*.[ch]
+
 clean:
 	rm -f runlim runlim-remount-proc test/r test/r test/p test/m test/*.o tests
 .PHONY: all clean install check

@@ -154,24 +154,36 @@ warning (const char *fmt, ...)
   fflush (log);
 }
 
+#define WRITE(TGT, SRC, SIZE, END) do { assert(SRC + SIZE < END); memcpy (TGT, SRC, SIZE); TGT += SIZE; } while(0)
+
 static void
 message (const char *type, const char *fmt, ...)
 {
   size_t len;
   va_list ap;
+  char outbuf[4096];
+  char *p = outbuf;
+  char *end = outbuf + 4096;
+  assert(type);
+  size_t type_len = strlen (type);
   assert (log);
-  fputs ("[runlim] ", log);
-  fputs (type, log);
-  fputc (':', log);
-  for (len = strlen (type); len < 14; len += 8)
-    fputc ('\t', log);
-  fputc ('\t', log);
+  WRITE (p, "[runlim] ", 9, end);
+  WRITE (p, type, type_len, end);
+  *p++ = ':';
+  for (len = type_len; len < 14; len += 8)
+    *p++ = '\t';
+  *p++ = '\t';
   va_start (ap, fmt);
-  vfprintf (log, fmt, ap);
+  int bytes_written = vsnprintf (p, end - p, fmt, ap);
+  if(bytes_written < 0) { exit(-1); }
   va_end (ap);
-  fputc ('\n', log);
+  p += bytes_written;
+  *p++ = '\n';
+  fwrite (outbuf, p - outbuf, 1, log);
   fflush (log);
 }
+
+#undef WRITE
 
 #define debug(TYPE, FMT, ARGS...) \
   do {                            \

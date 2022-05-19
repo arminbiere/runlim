@@ -1,6 +1,8 @@
 News for Version 2.0.0
 ----------------------
 
+- made the 'kill delay' an option
+
 - longer grace period before killing the process again
   (added to allow solvers to dump state after being killed)
 

@@ -26,6 +26,7 @@
 
 #define SAMPLE_RATE 100000l	/* in microseconds */
 #define REPORT_RATE 100l	/* in terms of sampling */
+#define KILL_DELAY 512l		/* in milliseconds */
 
 /*------------------------------------------------------------------------*/
 
@@ -97,6 +98,9 @@ struct Process
 "  --report-rate=<number>     report rate in terms of sampling " \
 "(default %ld)\n" \
 "\n" \
+"  --kill-delay=<number>      initial kill delay " \
+"(default %ld milliseconds)\n" \
+"\n" \
 "  --debug                    print debugging information\n" \
 "  -d\n" \
 "\n" \
@@ -121,7 +125,7 @@ static int debug_messages;
 static void
 usage (void)
 {
-  fprintf (log, USAGE, SAMPLE_RATE, REPORT_RATE);
+  fprintf (log, USAGE, SAMPLE_RATE, REPORT_RATE, KILL_DELAY);
   fflush (log);
 }
 
@@ -982,11 +986,13 @@ kill_recursively (Process * p, void(*killer)(Process *))
   return res;
 }
 
+static long kill_delay = KILL_DELAY;
+
 static void
 kill_all_child_processes (void)
 {
   static void (*killer) (Process *);
-  long ms = 512 * 1000;
+  long ms = kill_delay * 1000;
   long rounds = 0;
   Process * p;
   long killed;
@@ -1375,6 +1381,12 @@ main (int argc, char **argv)
 	      report_rate = parse_number_rhs (argv[i]);
 	      if (report_rate <= 0)
 		error ("invalid report rate '%ld'", report_rate);
+	    }
+	  else if (strstr (argv[i], "--kill-delay=") == argv[i])
+	    {
+	      kill_delay = parse_number_rhs (argv[i]);
+	      if (kill_delay <= 0)
+		error ("invalid kill delay '%ld'", kill_delay);
 	    }
 	  else if (strcmp (argv[i], "-v") == 0 ||
 	           strcmp (argv[i], "--version") == 0)

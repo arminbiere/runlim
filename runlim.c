@@ -1010,7 +1010,7 @@ kill_all_child_processes (void)
 
   for (;;)
     {
-      if (ms > 2000) killer = term_process;
+      if (ms <= 2000) killer = term_process;
       else           killer = kill_process;
 
       read = read_processes ();

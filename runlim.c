@@ -953,7 +953,7 @@ static void
 term_process (Process * p)
 {
   assert (p->pid != parent_pid);
-  debug ("terminate", "%d", p->pid);
+  debug ("kill with SIGTERM ", "%d", p->pid);
   kill (p->pid, SIGTERM);
 }
 
@@ -961,7 +961,7 @@ static void
 kill_process (Process * p)
 {
   assert (p->pid != parent_pid);
-  debug ("kill", "%d", p->pid);
+  debug ("kill with SIGKILL ", "%d", p->pid);
   kill (p->pid, SIGKILL);
 }
 
@@ -1010,8 +1010,8 @@ kill_all_child_processes (void)
 
   for (;;)
     {
-      if (ms > 2000) killer = term_process;
-      else           killer = kill_process;
+      if (ms >= 2000) killer = term_process;
+      else            killer = kill_process;
 
       read = read_processes ();
 
@@ -1028,10 +1028,12 @@ kill_all_child_processes (void)
       debug ("killed", "%ld processes", killed);
 
       if (!killed) break;
-      if (rounds++ > 9) break;
+      if (ms <= 1000) break;
+
+      rounds++;
 
       usleep (ms);
-      if (ms > 1000) ms /= 2;
+      ms /= 2;
     }
 }
 
@@ -1385,7 +1387,7 @@ main (int argc, char **argv)
 	  else if (strstr (argv[i], "--kill-delay=") == argv[i])
 	    {
 	      kill_delay = parse_number_rhs (argv[i]);
-	      if (kill_delay <= 0)
+	      if (kill_delay <= 0 || kill_delay >= 1e6)
 		error ("invalid kill delay '%ld'", kill_delay);
 	    }
 	  else if (strcmp (argv[i], "-v") == 0 ||

@@ -1284,6 +1284,7 @@ main (int argc, char **argv)
 		tmp_name = argv[i];
 	        break;
 
+	      case 'r':
 	      case 's':
 	      case 't':
 	        i++;
@@ -1293,6 +1294,7 @@ main (int argc, char **argv)
 	      case 'h':
 	      case 'k':
 	      case 'p':
+	      case 'v':
 	        continue;
 
 	      case '-':

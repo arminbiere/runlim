@@ -1,5 +1,7 @@
-News for Version 2.0.0
-----------------------
+News for Version 2.0.0rc7
+-------------------------
+
+- fixed option handling for '-v' and '-r'
 
 - made the 'kill delay' an option
 

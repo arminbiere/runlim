@@ -75,10 +75,9 @@ struct Process
 "\n" \
 "where option is from the following list:\n" \
 "\n" \
-"  -h                         print this command line summary\n" \
-"  --help\n" \
+"  -h | --help                print this command line summary\n" \
 "\n" \
-"  --version                  print version number\n" \
+"  -v | --version             print version number\n" \
 "\n" \
 "  --output-file=<file>       output file (default '<stderr>')\n" \
 "  -o <file>\n" \
@@ -1238,7 +1237,6 @@ sig_other_handler (int s)
   restore_signal_handlers ();
   kill_all_child_processes ();
   usleep (1000);
-  // raise (s);
 }
 
 /*------------------------------------------------------------------------*/
@@ -1284,6 +1282,7 @@ main (int argc, char **argv)
 		tmp_name = argv[i];
 	        break;
 
+	      case 'r':
 	      case 's':
 	      case 't':
 	        i++;
@@ -1293,6 +1292,7 @@ main (int argc, char **argv)
 	      case 'h':
 	      case 'k':
 	      case 'p':
+	      case 'v':
 	        continue;
 
 	      case '-':

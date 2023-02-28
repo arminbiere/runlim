@@ -1,5 +1,7 @@
-News for Version 2.0.0rc7
+News for Version 2.0.0rc8
 -------------------------
+
+- try to avoid garbling messages
 
 - fixed option handling for '-v' and '-r'
 

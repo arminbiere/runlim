@@ -157,22 +157,36 @@ warning (const char * fmt, ...)
   fflush (log);
 }
 
+/* Messages are also generated while sampling, i.e., asynchronously
+ * triggered by the timer in signal handlers, we have to be careful not to
+ * garble sample messages with other messages.  The current solution is
+ * better than the previous one using similar approaches as 'warning' and
+ * 'error' but still not robust, which would need to use separate logging
+ * threads.
+*/
+
 static void
 message (const char * type, const char * fmt, ...)
 {
+  const size_t size_buffer = 1023;
+  char buffer[size_buffer + 1];
   size_t len;
   va_list ap;
   assert (log);
-  fputs ("[runlim] ", log);
-  fputs (type, log);
-  fputc (':', log);
+  buffer[0] = 0;
+  strncat (buffer, "[runlim] ", size_buffer);
+  strncat (buffer, type, size_buffer);
+  strncat (buffer, ":", size_buffer);
   for (len = strlen (type); len < 14; len += 8)
-    fputc ('\t', log);
-  fputc ('\t', log);
+    strncat (buffer, "\t", size_buffer);
+  strncat (buffer, "\t", size_buffer);
+  len = strlen (buffer);
+  assert (len < size_buffer);
   va_start (ap, fmt);
-  vfprintf (log, fmt, ap);
+  vsnprintf (buffer + len, size_buffer - len, fmt, ap);
   va_end (ap);
-  fputc ('\n', log);
+  strncat (buffer, "\n", size_buffer);
+  fputs (buffer, log);
   fflush (log);
 }
 

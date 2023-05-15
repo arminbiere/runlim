@@ -168,8 +168,8 @@ warning (const char * fmt, ...)
 static void
 message (const char * type, const char * fmt, ...)
 {
-  const size_t size_buffer = 1023;
-  char buffer[size_buffer + 1];
+  char buffer[1024];
+  const size_t size_buffer = sizeof buffer - 1;
   size_t len;
   va_list ap;
   assert (log);

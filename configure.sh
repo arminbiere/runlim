@@ -38,12 +38,12 @@ then
       fi
       ;;
     *)
-      COMPILE="-W"
+      COMPILE="$CC-W"
       if [ $debug = yes ]
       then
-	COMPILE="$COMPILE -g"
+	COMPILE="$CC -g"
       else
-	COMPILE="$COMPILE -O -DNDEBUG"
+	COMPILE="$CC -O -DNDEBUG"
       fi
       ;;
   esac

@@ -12,7 +12,7 @@ while [ $# -gt 0 ]
 do
   case "$1" in
     -h|--help)
-      echo "usage: configure.sh [-h|--help|-g|--prefix=<install-dir>]"
+      echo "usage: [CC=<compiler>] configure.sh [-h|--help|-g|--prefix=<install-dir>]"
       exit 0
       ;;
     -g) debug=yes;;
@@ -24,7 +24,12 @@ do
   esac
   shift
 done
-[ x"$CC" = x ] && COMPILE=gcc
+if [ x"$CC" = x ]
+then
+  COMPILE=gcc
+else
+  COMPILE="$CC"
+fi
 if [ x"$CFLAGS" = x ]
 then
   case x"$COMPILE" in

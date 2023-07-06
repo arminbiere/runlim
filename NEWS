@@ -7,6 +7,9 @@ News for Version 2.0.0rc8
 
 - made the 'kill delay' an option
 
+- fixed usage of 'CC' environment variable in configure
+  (thanks to Mate Soos finding this issue)
+
 - longer grace period before killing the process again
   (added to allow solvers to dump state after being killed)
 

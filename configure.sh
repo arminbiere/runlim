@@ -33,7 +33,7 @@ fi
 if [ x"$CFLAGS" = x ]
 then
   case x"$COMPILE" in
-    xgcc)
+    xclang*|xgcc*)
       COMPILE="$COMPILE -Wall"
       if [ $debug = yes ]
       then
@@ -43,7 +43,7 @@ then
       fi
       ;;
     *)
-      COMPILE="-W"
+      COMPILE="$COMPILE -W"
       if [ $debug = yes ]
       then
 	COMPILE="$COMPILE -g"

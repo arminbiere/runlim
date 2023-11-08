@@ -58,6 +58,7 @@ struct Process
   char cyclic_killing;
   int pid;
   int ppid;
+  int pgrp;
   long sampled;
   double time;
   double memory;
@@ -599,7 +600,7 @@ static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile int killing;
 
 static void
-add_process (pid_t pid, pid_t ppid, double time, double memory)
+add_process (pid_t pid, pid_t ppid, pid_t pgrp, double time, double memory)
 {
   const char * type;
   Process * p;
@@ -632,6 +633,7 @@ add_process (pid_t pid, pid_t ppid, double time, double memory)
       p->active = 1;
       p->pid = pid;
       p->ppid = ppid;
+      p->pgrp = pgrp;
       p->time = time;
       p->memory = memory;
       p->next_process = 0;
@@ -719,8 +721,7 @@ read_process (long pid)
   READ (5, int, pgrp, "%d");
   READ (6, int, session, "%d");
   debug ("read", "pid=%d ppid=%d pgrp=%d session=%d", pid, ppid, pgrp, session);
-  if (pgrp != pid && pgrp != parent_pid &&
-      pgrp != group_pid && session != session_pid)
+  if (pgrp != group_pid && session != session_pid)
     FAILED;
   IGNR (7, int, tty_nr, "%d");
   IGNR (8, int, tpgid, "%d");
@@ -751,7 +752,7 @@ read_process (long pid)
   debug ("stime", "%f microseconds", stime);
   const double time = (utime + stime) / (double) clock_ticks;
   const double memory = rss * memory_per_page;
-  add_process (pid, ppid, time, memory);
+  add_process (pid, ppid, pgrp, time, memory);
   return 1;
 }
 
@@ -798,7 +799,7 @@ read_all_processes (void)
       if (pid == parent_pid) continue;
       if (read_process (pid)) res++;
     }
-  
+
   (void) closedir (dir);
   debug ("added", "%ld processes", res);
 
@@ -838,17 +839,20 @@ connect_process_tree (void)
       assert (p->pid != parent_pid);
       parent = find_process (p->ppid);
       p->parent = parent;
-      if (parent->first_child) {
-	assert (parent->last_child);
-	assert (!parent->last_child->next_sibbling);
-	parent->last_child->next_sibbling = p;
-	parent->last_child = p;
-	assert (!p->next_sibbling);
-      } else {
-	assert (!parent->last_child);
-        parent->first_child = parent->last_child = p;
-	assert (!p->next_sibbling);
-      }
+      if (parent->first_child)
+	{
+	  assert (parent->last_child);
+	  assert (!parent->last_child->next_sibbling);
+	  parent->last_child->next_sibbling = p;
+	  parent->last_child = p;
+	  assert (!p->next_sibbling);
+	}
+      else
+	{
+	  assert (!parent->last_child);
+	  parent->first_child = parent->last_child = p;
+	  assert (!p->next_sibbling);
+	}
       debug ("connect", "%d -> %d", p->ppid, p->pid);
       connected++;
     }
@@ -948,7 +952,7 @@ sample_recursively (Process * p)
 
   assert (p->cyclic_sampling);
   p->cyclic_sampling = 0;
-  
+
   return res;
 }
 
@@ -999,6 +1003,19 @@ kill_recursively (Process * p, void(*killer)(Process *))
   return res;
 }
 
+static int
+is_root_zombie (Process * p)
+{
+  if (p->pid == child_pid)
+    return 0;
+  if (p->ppid == child_pid)
+    return 0;
+  if (p->pgrp != group_pid)
+    return 0;
+  Process * parent = find_process (p->ppid);
+  return parent->pgrp != group_pid;
+}
+
 static long kill_delay = KILL_DELAY;
 
 static void
@@ -1036,6 +1053,10 @@ kill_all_child_processes (void)
 	  p = find_process (child_pid);
 	  if (p->active)
 	    killed = kill_recursively (p, killer);
+
+          for (p = active_processes; p; p = p->next_process)
+	    if (p->active && is_root_zombie (p))
+	      killed += kill_recursively (p, killer);
 	}
 
       debug ("killed", "%ld processes", killed);
@@ -1130,7 +1151,7 @@ static long sample_rate = SAMPLE_RATE;
 static long report_rate = REPORT_RATE;
 
 static void
-sample_all_child_processes (int s)
+sample_all_child_processes (void)
 {
   long sampled, read;
   double load;
@@ -1143,7 +1164,7 @@ sample_all_child_processes (int s)
   pthread_mutex_lock (&mutex);
   ignore = killing;
   pthread_mutex_unlock (&mutex);
-  
+
   if (ignore) return;
 
   load = sample_load ();
@@ -1159,6 +1180,10 @@ sample_all_child_processes (int s)
     {
       p = find_process (child_pid);
       sampled = sample_recursively (p);
+
+      for (p = active_processes; p; p = p->next_process)
+	if (p->active && is_root_zombie (p))
+	  sampled += sample_recursively (p);
     }
   else
     sampled = 0;
@@ -1169,7 +1194,7 @@ sample_all_child_processes (int s)
   sampled_time += accumulated_time;
 
   if (sampled > 0)
-    { 
+    {
       if (sampled_memory > max_memory)
 	max_memory = sampled_memory;
 
@@ -1206,6 +1231,13 @@ sample_all_child_processes (int s)
 	    }
 	}
     }
+}
+
+static void
+alarm_handler_to_sample_all_children (int s)
+{
+  assert (s == SIGALRM);
+  sample_all_child_processes ();
 }
 
 /*------------------------------------------------------------------------*/
@@ -1496,11 +1528,11 @@ main (int argc, char **argv)
 
 	  usleep (10000);
 
-	  timer.it_interval.tv_sec  = sample_rate / 1000000;
+	  timer.it_interval.tv_sec = sample_rate / 1000000;
 	  timer.it_interval.tv_usec = sample_rate % 1000000;
 	  timer.it_value = timer.it_interval;
 
-	  signal (SIGALRM, sample_all_child_processes);
+	  signal (SIGALRM, alarm_handler_to_sample_all_children);
 	  setitimer (ITIMER_REAL, &timer, &old_timer);
 
 	  (void) wait (&status);
@@ -1555,6 +1587,7 @@ main (int argc, char **argv)
   else if (caught_out_of_time)
     ok = OUT_OF_TIME;
 
+  sample_all_child_processes ();
   kill_all_child_processes ();
 
   t = time (0);

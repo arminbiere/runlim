@@ -1333,12 +1333,6 @@ main (int argc, char **argv)
 	        i++;
 		continue;
 
-	      case 'd':
-	      case 'h':
-	      case 'k':
-	      case 'p':
-	      case 'v':
-	        continue;
 
 	      case '-':
 	        if (strstr (argv[i], "--output-file=") == argv[i])
@@ -1351,6 +1345,9 @@ main (int argc, char **argv)
 		  }
 		else
 		  continue;
+
+	      default:
+		continue;
 	    }
 
 	  if (log_name)

@@ -59,6 +59,7 @@ struct Process
   int pid;
   int ppid;
   int pgrp;
+  int psession;
   long sampled;
   double time;
   double memory;
@@ -600,7 +601,7 @@ static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile int killing;
 
 static void
-add_process (pid_t pid, pid_t ppid, pid_t pgrp, double time, double memory)
+add_process (pid_t pid, pid_t ppid, pid_t pgrp, pid_t psession, double time, double memory)
 {
   const char * type;
   Process * p;
@@ -634,6 +635,7 @@ add_process (pid_t pid, pid_t ppid, pid_t pgrp, double time, double memory)
       p->pid = pid;
       p->ppid = ppid;
       p->pgrp = pgrp;
+      p->psession = psession;
       p->time = time;
       p->memory = memory;
       p->next_process = 0;
@@ -719,9 +721,13 @@ read_process (long pid)
   IGNR (3, char, state, "%c");
   READ (4, int, ppid, "%d");
   READ (5, int, pgrp, "%d");
-  READ (6, int, session, "%d");
-  debug ("read", "pid=%d ppid=%d pgrp=%d session=%d", pid, ppid, pgrp, session);
-  if (pgrp != group_pid && session != session_pid)
+  READ (6, int, psession, "%d");
+  debug ("read", "pid=%d ppid=%d pgrp=%d session=%d", pid, ppid, pgrp, psession);
+  if (group_pid <= pid && pid < child_pid)
+    FAILED;
+  if (session_pid <= pid && pid < child_pid)
+    FAILED;
+  if (pgrp != group_pid && psession != session_pid)
     FAILED;
   IGNR (7, int, tty_nr, "%d");
   IGNR (8, int, tpgid, "%d");
@@ -752,7 +758,7 @@ read_process (long pid)
   debug ("stime", "%f microseconds", stime);
   const double time = (utime + stime) / (double) clock_ticks;
   const double memory = rss * memory_per_page;
-  add_process (pid, ppid, pgrp, time, memory);
+  add_process (pid, ppid, pgrp, psession, time, memory);
   return 1;
 }
 
@@ -1004,16 +1010,40 @@ kill_recursively (Process * p, void(*killer)(Process *))
 }
 
 static int
+ancestor_in_same_session (Process * p)
+{
+  if (p->psession != session_pid)
+    return 0;
+  assert (session_pid <= child_pid);
+  if (session_pid <= p->pid && p->pid < child_pid)
+    return 1;
+  return 0;
+}
+
+static int
+ancestor_in_same_group (Process * p)
+{
+  if (p->pgrp != group_pid)
+    return 0;
+  assert (group_pid <= child_pid);
+  if (group_pid <= p->pid && p->pid < child_pid)
+    return 1;
+  return 0;
+}
+
+static int
 is_root_zombie (Process * p)
 {
   if (p->pid == child_pid)
     return 0;
   if (p->ppid == child_pid)
     return 0;
-  if (p->pgrp != group_pid)
+  if (ancestor_in_same_group (p))
+    return 0;
+  if (ancestor_in_same_session (p))
     return 0;
   Process * parent = find_process (p->ppid);
-  return parent->pgrp != group_pid;
+  return parent->pgrp != group_pid && parent->psession != session_pid;
 }
 
 static long kill_delay = KILL_DELAY;
@@ -1521,6 +1551,16 @@ main (int argc, char **argv)
 	  debug ("group", "%d", group_pid);
 	  debug ("session", "%d", session_pid);
 	  debug ("parent", "%d", parent_pid);
+
+	  // The 'sampling' and killing of zombie processes relies on identifying
+	  // group, session and other ancestor processes of the child process by
+	  // comparing absolute numbers.  This assumes the following conditions.
+
+	  if (group_pid > child_pid)
+	    error ("group pid %d larger than child pid %d", group_pid, child_pid);
+
+	  if (session_pid > child_pid)
+	    error ("session pid %d larger than child pid %d", session_pid, child_pid);
 
 	  usleep (10000);
 

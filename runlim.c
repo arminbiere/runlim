@@ -1158,7 +1158,6 @@ sample_all_child_processes (void)
   Process * p;
   int ignore;
 
-  assert (s == SIGALRM);
   assert (getpid () == parent_pid);
 
   pthread_mutex_lock (&mutex);

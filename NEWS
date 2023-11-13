@@ -1,5 +1,7 @@
-News for Version 2.0.0rc11
--------------------------
+News for Version 2.0.0rc12
+--------------------------
+
+- additional manual test cases for those zombie issues
 
 - more precise selection of sampled and killed processes
 

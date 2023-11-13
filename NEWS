@@ -1,5 +1,9 @@
-News for Version 2.0.0rc10
+News for Version 2.0.0rc11
 -------------------------
+
+- fixed option handling for invalid short options
+
+- removed stale assertion (prevented debugging compilation)
 
 - sampling and killing zombies
 

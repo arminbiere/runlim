@@ -872,6 +872,19 @@ static double accumulated_time;
 
 /*------------------------------------------------------------------------*/
 
+/* returns 1 iff p is a (direct or indirect) descendant of the child process */
+static int
+in_tree (Process *p)
+{
+  for (; p != NULL; p = p->parent)
+    {
+      if (p->pid == child_pid)
+        return 1;
+    }
+
+  return 0;
+}
+
 static long
 flush_inactive_processes (void)
 {
@@ -899,8 +912,11 @@ flush_inactive_processes (void)
 	  else
 	    active_processes = next;
 
-	  debug ("deactive", "%d (%.3f sec)", p->pid, p->time);
-	  accumulated_time += p->time;
+	  if (in_tree(p)) {
+	    debug ("deactive", "%d (%.3f sec)", p->pid, p->time);
+	    accumulated_time += p->time;
+	  }
+
 	  p->next_process = 0;
 	  res++;
 	}

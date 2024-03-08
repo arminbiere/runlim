@@ -1,5 +1,7 @@
-News for Version 2.0.0rc12
+News for Version 2.0.0rc13
 --------------------------
+
+- no interval for session and group PID in single mode
 
 - additional manual test cases for those zombie issues
 

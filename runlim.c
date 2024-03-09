@@ -1375,10 +1375,10 @@ int main(int argc, char **argv) {
       // group, session and other ancestor processes of the child process by
       // comparing absolute numbers.  This assumes the following conditions.
 
-      if (group_pid > child_pid)
+      if (!single && group_pid > child_pid)
 	error("group pid %d larger than child pid %d", group_pid, child_pid);
 
-      if (session_pid > child_pid)
+      if (!single && session_pid > child_pid)
 	error("session pid %d larger than child pid %d", session_pid,
 	      child_pid);
 

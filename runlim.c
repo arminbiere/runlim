@@ -26,7 +26,7 @@
 
 #define SAMPLE_RATE 100000l /* in microseconds */
 #define REPORT_RATE 100l    /* in terms of sampling */
-#define KILL_DELAY 512l	    /* in milliseconds */
+#define KILL_DELAY 512l     /* in milliseconds */
 
 /*------------------------------------------------------------------------*/
 
@@ -358,6 +358,8 @@ static long clock_ticks;
 static double memory_per_page;
 static double physical_memory;
 
+static int max_pid = 1u << 22;
+
 static void get_page_size() {
   page_size = (long)sysconf(_SC_PAGE_SIZE);
   if (page_size <= 0)
@@ -384,6 +386,24 @@ static void get_clock_ticks() {
   if (clock_ticks <= 0)
     clock_ticks = HZ;
   debug("clock ticks", "%ld", clock_ticks);
+}
+
+static void get_max_pid() {
+  FILE *file = fopen("/proc/sys/kernel/pid_max", "r");
+  if (file) {
+    int tmp;
+    if (fscanf(file, "%d", &tmp) == 1) {
+      max_pid = tmp;
+      debug("maximum pid", "%d", max_pid);
+    } else
+      warning("could not read 'max_pid' from '/proc/sys/kernel/pid_max' "
+              "(assuming default '%d')",
+              max_pid);
+    fclose(file);
+  } else
+    warning("could not open and read 'max_pid' from '/proc/sys/kernel/pid_max' "
+            "(assuming default '%d')",
+            max_pid);
 }
 
 /*------------------------------------------------------------------------*/
@@ -545,7 +565,7 @@ static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static volatile int killing;
 
 static void add_process(pid_t pid, pid_t ppid, pid_t pgrp, pid_t psession,
-			double time, double memory) {
+                        double time, double memory) {
   const char *type;
   Process *p;
 
@@ -631,9 +651,21 @@ static int parsed;
     int ch;                                                                    \
     while ((ch = getc(file)) != ')')                                           \
       if (ch == EOF)                                                           \
-	FAILED;                                                                \
+        FAILED;                                                                \
     assert(++parsed == (POS));                                                 \
   } while (0)
+
+static int contained_in_pid_range(int pid, int from_inclusive,
+                                  int to_non_inclusive) {
+  assert(0 < pid);
+  assert(pid <= max_pid);
+  assert(0 < from_inclusive);
+  assert(0 < to_non_inclusive);
+  assert(from_inclusive != to_non_inclusive);
+  return (from_inclusive <= to_non_inclusive)
+             ? from_inclusive <= pid && pid < to_non_inclusive
+             : from_inclusive <= pid || pid < to_non_inclusive;
+}
 
 static int read_process(long pid) {
   char path[64];
@@ -656,9 +688,9 @@ static int read_process(long pid) {
   READ(5, int, pgrp, "%d");
   READ(6, int, psession, "%d");
   debug("read", "pid=%d ppid=%d pgrp=%d session=%d", pid, ppid, pgrp, psession);
-  if (!single && group_pid <= pid && pid < child_pid)
+  if (!single && contained_in_pid_range(pid, group_pid, child_pid))
     FAILED;
-  if (!single && session_pid <= pid && pid < child_pid)
+  if (!single && contained_in_pid_range(pid, session_pid, child_pid))
     FAILED;
   if (pgrp != group_pid && psession != session_pid)
     FAILED;
@@ -813,11 +845,11 @@ static long flush_inactive_processes(void) {
       p->active = 0;
 
       if (prev)
-	prev->next_process = next;
+        prev->next_process = next;
       else
-	active_processes = next;
+        active_processes = next;
 
-      debug("deactive", "%d (%.3f sec)", p->pid, p->time);
+      debug("deactivate", "%d (%.3f sec)", p->pid, p->time);
       accumulated_time += p->time;
       p->next_process = 0;
       res++;
@@ -885,13 +917,13 @@ static volatile int caught_out_of_time;
 
 static void term_process(Process *p) {
   assert(p->pid != parent_pid);
-  debug("kill with SIGTERM ", "%d", p->pid);
+  debug("kill with SIGTERM", "%d", p->pid);
   kill(p->pid, SIGTERM);
 }
 
 static void kill_process(Process *p) {
   assert(p->pid != parent_pid);
-  debug("kill with SIGKILL ", "%d", p->pid);
+  debug("kill with SIGKILL", "%d", p->pid);
   kill(p->pid, SIGKILL);
 }
 
@@ -918,8 +950,7 @@ static int ancestor_in_same_session(Process *p) {
   if (p->psession != session_pid)
     return 0;
   if (!single) {
-    assert(session_pid <= child_pid);
-    if (session_pid <= p->pid && p->pid < child_pid)
+    if (contained_in_pid_range(p->pid, session_pid, child_pid))
       return 1;
   }
   return 0;
@@ -930,7 +961,7 @@ static int ancestor_in_same_group(Process *p) {
     return 0;
   if (!single) {
     assert(group_pid <= child_pid);
-    if (group_pid <= p->pid && p->pid < child_pid)
+    if (contained_in_pid_range(p->pid, group_pid, child_pid))
       return 1;
   }
   return 0;
@@ -985,11 +1016,11 @@ static void kill_all_child_processes(void) {
       connect_process_tree();
       p = find_process(child_pid);
       if (p->active)
-	killed = kill_recursively(p, killer);
+        killed = kill_recursively(p, killer);
 
       for (p = active_processes; p; p = p->next_process)
-	if (p->active && is_root_zombie(p))
-	  killed += kill_recursively(p, killer);
+        if (p->active && is_root_zombie(p))
+          killed += kill_recursively(p, killer);
     }
 
     debug("killed", "%ld processes", killed);
@@ -1043,7 +1074,7 @@ static double real_time(void) {
 static void report(double time, double memory, double load) {
   double real = real_time();
   message("sample", "%.2f time, %.2f real, %.0f MB, %.2f load", time, real,
-	  memory, load);
+          memory, load);
   num_reports++;
 }
 
@@ -1103,7 +1134,7 @@ static void sample_all_child_processes(void) {
 
     for (p = active_processes; p; p = p->next_process)
       if (p->active && is_root_zombie(p))
-	sampled += sample_recursively(p);
+        sampled += sample_recursively(p);
   } else
     sampled = 0;
 
@@ -1131,13 +1162,13 @@ static void sample_all_child_processes(void) {
   if (sampled > 0) {
     if (sampled_time > time_limit || real_time() > real_time_limit) {
       if (!caught_out_of_time) {
-	caught_out_of_time = 1;
-	kill_all_child_processes();
+        caught_out_of_time = 1;
+        kill_all_child_processes();
       }
     } else if (sampled_memory > space_limit) {
       if (!caught_out_of_memory) {
-	caught_out_of_memory = 1;
-	kill_all_child_processes();
+        caught_out_of_memory = 1;
+        kill_all_child_processes();
       }
     }
   }
@@ -1220,107 +1251,109 @@ int main(int argc, char **argv) {
 
       switch (argv[i][1]) {
       case 'o':
-	if (++i == argc)
-	  error("file argument to '-o' missing (try '-h')");
-	tmp_name = argv[i];
-	break;
+        if (++i == argc)
+          error("file argument to '-o' missing (try '-h')");
+        tmp_name = argv[i];
+        break;
 
       case 'r':
       case 's':
       case 't':
-	i++;
-	continue;
+        i++;
+        continue;
 
       case '-':
-	if (strstr(argv[i], "--output-file=") == argv[i]) {
-	  tmp_name = strchr(argv[i], '=');
-	  assert(tmp_name);
-	  assert(*tmp_name == '=');
-	  tmp_name++;
-	  break;
-	} else
-	  continue;
+        if (strstr(argv[i], "--output-file=") == argv[i]) {
+          tmp_name = strchr(argv[i], '=');
+          assert(tmp_name);
+          assert(*tmp_name == '=');
+          tmp_name++;
+          break;
+        } else
+          continue;
 
       default:
-	continue;
+        continue;
       }
 
       if (log_name)
-	error("multiple output files '%s' and '%s'", log_name, tmp_name);
+        error("multiple output files '%s' and '%s'", log_name, tmp_name);
 
       assert(tmp_name);
       log_name = tmp_name;
       log = fopen(log_name, "w");
       if (!log)
-	error("can not write output to '%s'", log_name);
+        error("can not write output to '%s'", log_name);
       close_log = 1;
     } else
       break;
   }
 
-  get_page_size();
-  get_physical_memory();
-  get_clock_ticks();
-
   ok = OK; /* status of the runlim */
   s = 0;   /* signal caught */
 
-  time_limit = 60 * 60 * 24 * 3600; /* one year */
-  real_time_limit = time_limit;	    /* same as time limit by default */
-  space_limit = physical_memory;
+  int time_limit_set = 0;
+  int real_time_limit_set = 0;
+  int space_limit_set = 0;
 
   for (i = 1; i < argc; i++) {
     if (argv[i][0] == '-') {
       if (argv[i][1] == 'o') {
-	assert(close_log);
-	i++;
-	assert(i < argc);
+        assert(close_log);
+        i++;
+        assert(i < argc);
       } else if (argv[i][1] == 't') {
-	time_limit = parse_number_argument(&i, argc, argv);
+        time_limit = parse_number_argument(&i, argc, argv);
+        time_limit_set = 1;
       } else if (strstr(argv[i], "--time-limit=") == argv[i]) {
-	time_limit = parse_number_rhs(argv[i]);
+        time_limit = parse_number_rhs(argv[i]);
+        time_limit_set = 1;
       } else if (argv[i][1] == 'r') {
-	real_time_limit = parse_number_argument(&i, argc, argv);
+        real_time_limit = parse_number_argument(&i, argc, argv);
+        real_time_limit_set = 1;
       } else if (strstr(argv[i], "--output-file=") == argv[i]) {
-	assert(close_log);
+        assert(close_log);
       } else if (strstr(argv[i], "--real-time-limit=") == argv[i]) {
-	real_time_limit = parse_number_rhs(argv[i]);
+        real_time_limit = parse_number_rhs(argv[i]);
+        real_time_limit_set = 1;
       } else if (argv[i][1] == 's') {
-	space_limit = parse_number_argument(&i, argc, argv);
+        space_limit = parse_number_argument(&i, argc, argv);
+        space_limit_set = 1;
       } else if (strstr(argv[i], "--space-limit=") == argv[i]) {
-	space_limit = parse_number_rhs(argv[i]);
+        space_limit = parse_number_rhs(argv[i]);
+        space_limit_set = 1;
       } else if (strstr(argv[i], "--sample-rate=") == argv[i]) {
-	sample_rate = parse_number_rhs(argv[i]);
-	if (sample_rate <= 0)
-	  error("invalid sample rate '%ld'", sample_rate);
+        sample_rate = parse_number_rhs(argv[i]);
+        if (sample_rate <= 0)
+          error("invalid sample rate '%ld'", sample_rate);
       } else if (strstr(argv[i], "--report-rate=") == argv[i]) {
-	report_rate = parse_number_rhs(argv[i]);
-	if (report_rate <= 0)
-	  error("invalid report rate '%ld'", report_rate);
+        report_rate = parse_number_rhs(argv[i]);
+        if (report_rate <= 0)
+          error("invalid report rate '%ld'", report_rate);
       } else if (strstr(argv[i], "--kill-delay=") == argv[i]) {
-	kill_delay = parse_number_rhs(argv[i]);
-	if (kill_delay <= 0 || kill_delay >= 1e6)
-	  error("invalid kill delay '%ld'", kill_delay);
+        kill_delay = parse_number_rhs(argv[i]);
+        if (kill_delay <= 0 || kill_delay >= 1e6)
+          error("invalid kill delay '%ld'", kill_delay);
       } else if (strcmp(argv[i], "-v") == 0 ||
-		 strcmp(argv[i], "--version") == 0) {
-	printf("%s\n", VERSION);
-	fflush(stdout);
-	exit(0);
+                 strcmp(argv[i], "--version") == 0) {
+        printf("%s\n", VERSION);
+        fflush(stdout);
+        exit(0);
       } else if (strcmp(argv[i], "-d") == 0 ||
-		 strcmp(argv[i], "--debug") == 0) {
-	debug_messages = 1;
+                 strcmp(argv[i], "--debug") == 0) {
+        debug_messages = 1;
       } else if (strcmp(argv[i], "--single") == 0) {
-	single = 1;
+        single = 1;
       } else if (strcmp(argv[i], "-k") == 0 || strcmp(argv[i], "--kill") == 0) {
-	propagate_signals = 1;
+        propagate_signals = 1;
       } else if (strcmp(argv[i], "-p") == 0 ||
-		 strcmp(argv[i], "--propagate") == 0) {
-	propagate_exit_code = 1;
+                 strcmp(argv[i], "--propagate") == 0) {
+        propagate_exit_code = 1;
       } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-	usage();
-	exit(0);
+        usage();
+        exit(0);
       } else
-	error("invalid option '%s' (try '-h')", argv[1]);
+        error("invalid option '%s' (try '-h')", argv[1]);
     } else
       break;
   }
@@ -1330,6 +1363,19 @@ int main(int argc, char **argv) {
 
   message("version", "%s", VERSION);
   message("host", "%s", read_host_name());
+
+  get_page_size();
+  get_physical_memory();
+  get_clock_ticks();
+  get_max_pid();
+
+  if (!time_limit_set)
+    time_limit = 60 * 60 * 24 * 3600; /* one year */
+  if (!real_time_limit_set)
+    real_time_limit = time_limit; /* same as time limit by default */
+  if (!space_limit_set)
+    space_limit = physical_memory;
+
   message("time limit", "%.0f seconds", time_limit);
   message("real time limit", "%.0f seconds", real_time_limit);
   message("space limit", "%.0f MB", space_limit);
@@ -1375,12 +1421,14 @@ int main(int argc, char **argv) {
       // group, session and other ancestor processes of the child process by
       // comparing absolute numbers.  This assumes the following conditions.
 
+#if 0
       if (!single && group_pid > child_pid)
-	error("group pid %d larger than child pid %d", group_pid, child_pid);
+        error("group pid %d larger than child pid %d", group_pid, child_pid);
 
       if (!single && session_pid > child_pid)
-	error("session pid %d larger than child pid %d", session_pid,
-	      child_pid);
+        error("session pid %d larger than child pid %d", session_pid,
+              child_pid);
+#endif
 
       usleep(10000);
 
@@ -1396,33 +1444,34 @@ int main(int argc, char **argv) {
       setitimer(ITIMER_REAL, &old_timer, &timer);
 
       if (WIFEXITED(status))
-	res = WEXITSTATUS(status);
+        res = WEXITSTATUS(status);
       else if (WIFSIGNALED(status)) {
-	s = WTERMSIG(status);
-	res = 128 + s;
-	switch (s) {
-	case SIGXFSZ:
-	  ok = OUT_OF_MEMORY;
-	  break;
-	case SIGXCPU:
-	  ok = OUT_OF_TIME;
-	  break;
-	case SIGSEGV:
-	  ok = SEGMENTATION_FAULT;
-	  break;
-	case SIGBUS:
-	  ok = BUS_ERROR;
-	  break;
-	default:
-	  ok = OTHER_SIGNAL;
-	  break;
-	}
+        s = WTERMSIG(status);
+        res = 128 + s;
+        switch (s) {
+        case SIGXFSZ:
+          ok = OUT_OF_MEMORY;
+          break;
+        case SIGXCPU:
+          ok = OUT_OF_TIME;
+          break;
+        case SIGSEGV:
+          ok = SEGMENTATION_FAULT;
+          break;
+        case SIGBUS:
+          ok = BUS_ERROR;
+          break;
+        default:
+          ok = OTHER_SIGNAL;
+          break;
+        }
       } else {
-	ok = INTERNAL_ERROR;
-	res = 1;
+        ok = INTERNAL_ERROR;
+        res = 1;
       }
     }
   } else {
+    setpgrp();
     execvp(argv[i], argv + i);
     kill(getppid(), SIGUSR1); // TODO DOES THIS WORK?
     exit(1);
@@ -1512,7 +1561,7 @@ int main(int argc, char **argv) {
   if (process_hash_table) {
     for (size_t pos = 0; pos < size_of_process_hash_table; pos++)
       if (process_hash_table[pos])
-	free(process_hash_table[pos]);
+        free(process_hash_table[pos]);
 
     free(process_hash_table);
   }

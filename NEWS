@@ -1,6 +1,8 @@
 News for Version 2.0.0rc13
 --------------------------
 
+- explicit handle PIDs wrapping around
+
 - formatted with `clang-format`
 
 - no interval for session and group PID in single mode

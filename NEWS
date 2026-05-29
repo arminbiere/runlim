@@ -2,6 +2,8 @@ News for Version 2.0.0rc14
 --------------------------
 
 - using monotonic real-time clock
+  (otherwise the cluster nodes using NTP with clock skew
+   give weird results - even negative running times)
 
 - explicit handle PIDs wrapping around
 
@@ -41,7 +43,8 @@ News for Version 2.0.0rc14
 - semantical version numbering scheme
 
 - TAI-based time, i.e. changes to the system time (NTP or 
-  daylight saving time) cannot influence a running benchmark
+  daylight saving time) cannot influence a running benchmark,
+  but got removed again as monotonic is more important
 
 News for Version 1.22
 ---------------------

@@ -449,7 +449,6 @@ static int children;
 /*------------------------------------------------------------------------*/
 
 static double start_time;
-static double start_time_tai;
 static double time_limit;
 static double real_time_limit;
 static double space_limit;
@@ -1040,34 +1039,12 @@ static void kill_all_child_processes(void) {
 /*------------------------------------------------------------------------*/
 
 static double wall_clock_time(void) {
-  double res = -1;
-  struct timeval tv;
-  if (!gettimeofday(&tv, 0)) {
-    res = 1e-6 * tv.tv_usec;
-    res += tv.tv_sec;
-  }
-  return res;
-}
-
-static double tai_time(void) {
-  double res = -1;
   struct timespec ts;
-  if (!clock_gettime(CLOCK_TAI, &ts)) {
-    res = 1e-9 * ts.tv_nsec;
-    res += ts.tv_sec;
-  }
-  return res;
+  return clock_gettime(CLOCK_MONOTONIC, &ts) ? 0.0
+                                             : 1e-9 * ts.tv_nsec + ts.tv_sec;
 }
 
-/*------------------------------------------------------------------------*/
-
-static double real_time(void) {
-  double res;
-  if (start_time_tai < 0)
-    return -1;
-  res = tai_time() - start_time_tai;
-  return res;
-}
+static double real_time(void) { return wall_clock_time() - start_time; }
 
 /*------------------------------------------------------------------------*/
 
@@ -1391,7 +1368,6 @@ int main(int argc, char **argv) {
 
   (void)signal(SIGUSR1, sig_usr1_handler);
 
-  start_time_tai = tai_time();
   start_time = wall_clock_time();
 
   parent_pid = getpid();

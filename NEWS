@@ -1,5 +1,7 @@
-News for Version 2.0.0rc13
+News for Version 2.0.0rc14
 --------------------------
+
+- using monotonic real-time clock
 
 - explicit handle PIDs wrapping around
 
